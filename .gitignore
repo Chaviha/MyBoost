@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.output/
+.vercel/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+
+# Uploaded business photos
+uploads/
