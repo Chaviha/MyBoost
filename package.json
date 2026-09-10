@@ -10,6 +10,7 @@
     "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "vite dev --host 0.0.0.0 --port 8080",
     "dev:server": "node --env-file=.env server/index.js",
+    "start": "node server/index.js",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",

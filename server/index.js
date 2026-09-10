@@ -17,7 +17,7 @@ const avatarUploadRoot = path.join(__dirname, "..", "uploads", "avatars");
 fs.mkdirSync(uploadRoot, { recursive: true });
 fs.mkdirSync(assetUploadRoot, { recursive: true });
 fs.mkdirSync(avatarUploadRoot, { recursive: true });
-const PORT = Number(process.env.API_PORT || 3001);
+const PORT = Number(process.env.PORT || process.env.API_PORT || 3001);
 const SESSION_DAYS = 30;
 const RESET_MINUTES = 30;
 const mailer = process.env.SMTP_HOST
