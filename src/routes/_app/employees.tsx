@@ -25,7 +25,7 @@ export const Route = createFileRoute("/_app/employees")({
 });
 
 function EmployeesPage() {
-  const { selectedBusiness, businessEmployees, addEmployee, can } = useLife();
+  const { selectedBusiness, businessEmployees, addEmployee, refreshPublicMarketplace, can } = useLife();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
 
@@ -98,9 +98,14 @@ function EmployeesPage() {
           </DialogHeader>
           <EmployeeForm
             onCancel={() => setOpen(false)}
-            onSubmit={(form) => {
-              addEmployee(form);
-              toast.success(`${form.name} added to the team.`);
+            onSubmit={async (form) => {
+              await addEmployee(form);
+              await refreshPublicMarketplace();
+              toast.success(
+                form.listed
+                  ? `${form.name} added and listed on the marketplace.`
+                  : `${form.name} added to the team.`,
+              );
               setOpen(false);
             }}
           />
@@ -121,6 +126,8 @@ function EmployeeForm({
     email: string;
     role: string;
     jobStatus: string;
+    listed: boolean;
+    location: string;
   }) => void;
 }) {
   const [form, setForm] = useState({
@@ -129,6 +136,8 @@ function EmployeeForm({
     email: "",
     role: "",
     jobStatus: "Active",
+    listed: false,
+    location: "",
   });
   return (
     <form
@@ -173,6 +182,23 @@ function EmployeeForm({
           ))}
         </Select>
       </Field>
+      <label className="mt-3 flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={form.listed}
+          onChange={(e) => setForm({ ...form, listed: e.target.checked })}
+        />
+        List professional on the marketplace
+      </label>
+      {form.listed ? (
+        <Field label="Location">
+          <Input
+            value={form.location}
+            onChange={(e) => setForm({ ...form, location: e.target.value })}
+            placeholder="Westlands, Nairobi"
+          />
+        </Field>
+      ) : null}
       <div className="mt-4 flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel

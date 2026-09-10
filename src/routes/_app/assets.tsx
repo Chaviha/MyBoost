@@ -28,7 +28,7 @@ export const Route = createFileRoute("/_app/assets")({
 });
 
 function AssetsPage() {
-  const { myAssets, visibleBusinesses, addAsset, uploadAssetMedia, removeAssetMedia } = useLife();
+  const { myAssets, visibleBusinesses, addAsset, uploadAssetMedia, removeAssetMedia, refreshPublicMarketplace } = useLife();
   const [open, setOpen] = useState(false);
   const [mediaFor, setMediaFor] = useState<Asset | null>(null);
   const total = myAssets.reduce((s: number, a: Asset) => s + a.value, 0);
@@ -134,6 +134,7 @@ function AssetsPage() {
           try {
             const assetId = await addAsset(form);
             if (form.media.length) await uploadAssetMedia(assetId, form.media);
+            await refreshPublicMarketplace();
             toast.success(
               form.listed ? `${form.name} listed on the marketplace.` : `${form.name} added.`,
             );
@@ -174,6 +175,7 @@ function AssetDialog({
     value: string;
     ownership: "personal" | "business";
     listed: boolean;
+    listingType: "For sale" | "For hire";
     location: string;
     phone: string;
     media: StagedMedia[];
@@ -185,6 +187,7 @@ function AssetDialog({
     value: "",
     ownership: "personal" as "personal" | "business",
     listed: false,
+    listingType: "For sale",
     location: "",
     phone: "",
     media: [] as StagedMedia[],
@@ -258,6 +261,17 @@ function AssetDialog({
             />
             List on the marketplace
           </label>
+          {form.listed ? (
+            <Field label="Listing type">
+              <Select
+                value={form.listingType}
+                onChange={(e) => setForm({ ...form, listingType: e.target.value as "For sale" | "For hire" })}
+              >
+                <option value="For sale">For sale</option>
+                <option value="For hire">For hire</option>
+              </Select>
+            </Field>
+          ) : null}
           {form.listed ? (
             <>
               <Field label="Location">

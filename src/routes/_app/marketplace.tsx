@@ -8,7 +8,7 @@ import {
   Search,
   Store,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { ListingCover } from "@/components/listing-cover";
@@ -25,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { initials, money } from "@/lib/format";
+import type { Asset, Business, Employee } from "@/lib/types";
 import { useLife } from "@/lib/store";
 
 export const Route = createFileRoute("/_app/marketplace")({
@@ -41,9 +42,8 @@ function openWhatsApp(phone: string, text: string) {
 
 function MarketplacePage() {
   const {
-    marketplace,
-    marketProfessionals,
-    marketBusinesses,
+    publicMarketplace,
+    refreshPublicMarketplace,
     viewAsset,
     contactAsset,
     viewProfessional,
@@ -56,18 +56,25 @@ function MarketplacePage() {
   const [businessDetailId, setBusinessDetailId] = useState<string | null>(null);
   const seen = useRef(new Set<string>());
 
+  useEffect(() => {
+    void refreshPublicMarketplace();
+    const onFocus = () => void refreshPublicMarketplace();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
   const ql = q.trim().toLowerCase();
-  const assets = marketplace.filter((a) =>
+  const assets = (publicMarketplace.assets as Asset[]).filter((a) =>
     `${a.name} ${a.type} ${a.location} ${a.notes}`.toLowerCase().includes(ql),
   );
-  const pros = marketProfessionals.filter((p) =>
+  const pros = (publicMarketplace.professionals as Array<Employee & { business_name: string }>).filter((p) =>
     `${p.name} ${p.role} ${p.location} ${p.business_name}`.toLowerCase().includes(ql),
   );
-  const firms = marketBusinesses.filter((b) =>
+  const firms = (publicMarketplace.businesses as Business[]).filter((b) =>
     `${b.business_name} ${b.tagline} ${b.region}`.toLowerCase().includes(ql),
   );
   const selectedMarketplaceBusiness = businessDetailId
-    ? marketBusinesses.find((b) => b.business_id === businessDetailId) ?? null
+    ? firms.find((b) => b.business_id === businessDetailId) ?? null
     : null;
 
   function once(key: string, fn: () => void) {
@@ -121,7 +128,7 @@ function MarketplacePage() {
                       <p className="text-xs font-medium tracking-[0.14em] text-forest uppercase">
                         {asset.type}
                       </p>
-                      <Badge>Asset</Badge>
+                      <Badge tone="forest">{asset.listing_type || "For sale"}</Badge>
                     </div>
                     <h3 className="font-display text-xl font-medium tracking-tight">{asset.name}</h3>
                     <p className="font-display text-2xl font-medium tabular-nums">
@@ -175,7 +182,7 @@ function MarketplacePage() {
                       }}
                     >
                       <MessageCircle className="size-4" />
-                      Contact on WhatsApp
+                      Connect
                     </Button>
                   </div>
                 </Card>
@@ -262,7 +269,7 @@ function MarketplacePage() {
                       <p className="text-xs font-medium tracking-[0.14em] text-forest uppercase">
                         {b.business_type}
                       </p>
-                      <Badge>Business</Badge>
+                      <Badge tone={String(b.status).toLowerCase() === "closed" ? "amber" : "forest"}>{String(b.status).toLowerCase() === "closed" ? "Closed" : "Open"}</Badge>
                     </div>
                     <h3 className="font-display text-xl font-medium tracking-tight">
                       {b.business_name}
@@ -325,7 +332,7 @@ function MarketplacePage() {
                 </div>
                 {(selectedMarketplaceBusiness.gallery?.length || 0) > 1 ? (
                   <div>
-                    <h4 className="mb-3 font-medium">Photos & videos</h4>
+                    <h4 className="mb-3 font-display text-xl font-medium">Explore our work</h4>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                       {(selectedMarketplaceBusiness.gallery || []).map((media) =>
                         media.media_type === "video" ? (

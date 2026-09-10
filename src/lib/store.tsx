@@ -95,18 +95,23 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     assets: Array<Record<string, unknown>>;
   }>({ businesses: [], professionals: [], assets: [] });
 
-  const refreshPublicMarketplace = async () => {
+  const refreshPublicMarketplace = async (): Promise<boolean> => {
     try {
-      const response = await fetch("/api/public/marketplace", { credentials: "include" });
-      if (!response.ok) return;
+      const response = await fetch("/api/public/marketplace", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!response.ok) return false;
       const payload = await response.json();
       setPublicMarketplace({
         businesses: Array.isArray(payload.businesses) ? payload.businesses : [],
         professionals: Array.isArray(payload.professionals) ? payload.professionals : [],
         assets: Array.isArray(payload.assets) ? payload.assets : [],
       });
+      return true;
     } catch {
       // Marketplace is public and should not prevent the private workspace from loading.
+      return false;
     }
   };
 
@@ -380,7 +385,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               phone: form.phone || "",
               email: form.email || "",
               region: form.region,
-              status: "active",
+              status: form.status || "open",
               listed: Boolean(form.listed),
               tagline: form.tagline || "",
               views: 0,
@@ -598,78 +603,87 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           };
         });
       },
-      addEmployee: (form) => {
+      addEmployee: async (form) => {
         const employee_id = uid("EMP");
-        setState((prev) => {
-          let userId = "";
-          let users = prev.users;
-          let relationships = prev.relationships;
-          if (form.email) {
-            const existing = prev.users.find(
-              (u) => u.email.toLowerCase() === form.email.toLowerCase(),
-            );
-            userId = existing?.user_id ?? uid("USR");
-            if (!existing) {
-              users = [
-                ...users,
-                {
-                  user_id: userId,
-                  business_id: prev.selectedBusinessId,
-                  name: form.name,
-                  email: form.email,
-                  phone: form.phone,
-                  role: form.role,
-                  account_level: "user",
-                  status: "active",
-                },
-              ];
-            }
-            const hasRel = relationships.some(
-              (r) =>
-                r.user_id === userId &&
-                r.business_id === prev.selectedBusinessId &&
-                r.relationship_type === "employee",
-            );
-            if (!hasRel) {
-              relationships = [
-                ...relationships,
-                {
-                  relationship_id: uid("REL"),
-                  user_id: userId,
-                  business_id: prev.selectedBusinessId,
-                  relationship_type: "employee",
-                  role: form.role,
-                  job_status: form.jobStatus,
-                  status: "active",
-                },
-              ];
-            }
-          }
-          return {
-            ...prev,
-            users,
-            relationships,
-            employees: [
-              ...prev.employees,
+        let userId = "";
+        let users = state.users;
+        let relationships = state.relationships;
+
+        if (form.email) {
+          const existing = state.users.find(
+            (u) => u.email.toLowerCase() === form.email.toLowerCase(),
+          );
+          userId = existing?.user_id ?? uid("USR");
+          if (!existing) {
+            users = [
+              ...users,
               {
-                employee_id,
-                business_id: prev.selectedBusinessId,
+                user_id: userId,
+                business_id: state.selectedBusinessId,
                 name: form.name,
-                phone: form.phone,
                 email: form.email,
+                phone: form.phone,
+                role: form.role,
+                account_level: "user",
+                status: "active",
+              },
+            ];
+          }
+          const hasRel = relationships.some(
+            (r) =>
+              r.user_id === userId &&
+              r.business_id === state.selectedBusinessId &&
+              r.relationship_type === "employee",
+          );
+          if (!hasRel) {
+            relationships = [
+              ...relationships,
+              {
+                relationship_id: uid("REL"),
+                user_id: userId,
+                business_id: state.selectedBusinessId,
+                relationship_type: "employee",
                 role: form.role,
                 job_status: form.jobStatus,
-                salary: 0,
                 status: "active",
-                user_id: userId,
-                listed: false,
-                location: "",
-                views: 0,
-                whatsapp_clicks: 0,
               },
-            ],
-          };
+            ];
+          }
+        }
+
+        const nextState: LifeState = {
+          ...state,
+          users,
+          relationships,
+          employees: [
+            ...state.employees,
+            {
+              employee_id,
+              business_id: state.selectedBusinessId,
+              name: form.name,
+              phone: form.phone,
+              email: form.email,
+              role: form.role,
+              job_status: form.jobStatus,
+              salary: 0,
+              status: "active",
+              user_id: userId,
+              listed: form.listed,
+              location: form.location || "",
+              views: 0,
+              whatsapp_clicks: 0,
+            },
+          ],
+        };
+
+        setState(nextState);
+        const response = await fetch("/api/state", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ state: nextState }),
         });
+        if (!response.ok) throw new Error("Unable to save employee");
       },
       addSale: (form) => {
         setState((prev) => ({
@@ -731,6 +745,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               type: form.type,
               value: Number(form.value || 0),
               listed: form.listed,
+              listing_type: form.listingType || "For sale",
               location: form.location,
               phone: form.phone,
               views: 0,

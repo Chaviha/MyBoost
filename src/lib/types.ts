@@ -118,6 +118,7 @@ export type Asset = {
   type: string;
   value: number;
   listed: boolean;
+  listing_type: "For sale" | "For hire";
   location: string;
   phone: string;
   views: number;

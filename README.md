@@ -45,3 +45,17 @@ The authenticated home page contains only:
 - Marketplace
 
 The growth graph does not invent a constant percentage. It appears when enough real sales history exists.
+
+
+## Public Marketplace
+
+The public Marketplace reads listings from PostgreSQL through the LifeBoost API. The Vite client proxies `/api/*` to `http://localhost:3001`.
+
+For local development, create `.env` from `.env.example`, configure `DATABASE_URL`, then run:
+
+```powershell
+npm install
+npm run dev
+```
+
+Keep both the Vite client and the LifeBoost API running. If the API is stopped or cannot connect to PostgreSQL, the public Marketplace will show a connection error instead of incorrectly reporting zero listings.

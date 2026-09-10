@@ -34,6 +34,7 @@ function BusinessesPage() {
     removeBusinessMedia,
     reorderBusinessMedia,
     setSelectedBusinessId,
+    refreshPublicMarketplace,
     can,
   } = useLife();
   const navigate = useNavigate();
@@ -128,6 +129,7 @@ function BusinessesPage() {
               try {
                 const businessId = await addBusiness(form);
                 if (form.media.length) await uploadBusinessMedia(businessId, form.media);
+                await refreshPublicMarketplace();
                 toast.success(
                   form.listed ? `${form.name} added and listed on the marketplace.` : `${form.name} added.`,
                 );
@@ -174,6 +176,7 @@ function BusinessForm({
     region: string;
     media: StagedMedia[];
     listed: boolean;
+    status: string;
     tagline: string;
     phone: string;
     email: string;
@@ -185,6 +188,7 @@ function BusinessForm({
     region: "",
     media: [] as StagedMedia[],
     listed: false,
+    status: "open",
     tagline: "",
     phone: "",
     email: "",
@@ -228,6 +232,12 @@ function BusinessForm({
           onChange={(e) => setForm({ ...form, region: e.target.value })}
           placeholder="Nairobi"
         />
+      </Field>
+      <Field label="Business status">
+        <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+        </Select>
       </Field>
       <MediaPicker
         label="Business photos & videos"

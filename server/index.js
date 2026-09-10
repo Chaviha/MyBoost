@@ -450,7 +450,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
         }
       }
       for (const asset of Array.isArray(state.assets) ? state.assets : []) {
-        if (asset?.listed && businessMap.has(asset.business_id)) {
+        if (asset?.listed) {
           assets.push({
             asset_id: asset.asset_id,
             name: asset.name,
