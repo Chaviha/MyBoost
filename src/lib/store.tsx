@@ -41,6 +41,7 @@ import type {
   Offer,
   Product,
   Quotation,
+  Relationship,
   RequestStatus,
   Sacco,
   Sale,
@@ -278,6 +279,17 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     const myIncome = state.income.filter((i) => i.user_id === currentUser.user_id);
     const mySaccos = state.saccos.filter((s) => s.user_id === currentUser.user_id);
     const myOffers = state.offers.filter((o) => o.user_id === currentUser.user_id);
+    const myConnections = state.relationships
+      .filter(
+        (r) =>
+          r.user_id === currentUser.user_id &&
+          (r.relationship_type === "employee" || r.relationship_type === "customer") &&
+          r.status.toLowerCase() === "active",
+      )
+      .map((r) => ({
+        relationship: r,
+        business: state.businesses.find((b) => b.business_id === r.business_id),
+      }));
     const marketProfessionals = state.employees
       .filter((e) => e.listed)
       .map((e) => ({
@@ -293,7 +305,17 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       : state.requests.filter((r) => r.user_id === currentUser.user_id);
 
     const myRequests = state.requests.filter((r) => r.user_id === currentUser.user_id);
-    const myTabs = state.customers.filter((c) => c.user_id === currentUser.user_id);
+    const myTabs = state.customers.filter(
+      (c) =>
+        c.user_id === currentUser.user_id &&
+        state.relationships.some(
+          (r) =>
+            r.user_id === currentUser.user_id &&
+            r.business_id === c.business_id &&
+            r.relationship_type === "customer" &&
+            r.status.toLowerCase() === "active",
+        ),
+    );
     const myCustomerJobs = state.jobs.filter((j) =>
       myTabs.some((t) => t.customer_id === j.customer_id),
     );
@@ -345,6 +367,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       myIncome,
       mySaccos,
       myOffers,
+      myConnections,
       myCustomerJobs,
       myCustomerSales,
       marketProfessionals,
@@ -369,6 +392,77 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       canPay: (customer) => canRecordPayment(chargeOpts(customer)),
       setSelectedBusinessId: (id) => {
         setState((prev) => ({ ...prev, selectedBusinessId: id }));
+      },
+      acceptOffer: async (offerId) => {
+        const response = await fetch("/api/relationships/respond", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ offerId, decision: "accepted" }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Unable to accept offer");
+        if (payload.state) setState(removeLegacyDemoData(payload.state as LifeState));
+      },
+      declineOffer: async (offerId) => {
+        const response = await fetch("/api/relationships/respond", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ offerId, decision: "declined" }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Unable to decline offer");
+        if (payload.state) setState(removeLegacyDemoData(payload.state as LifeState));
+      },
+      updateBusiness: (businessId, patch) => {
+        setState((prev) => ({ ...prev, businesses: prev.businesses.map((b) => b.business_id === businessId ? { ...b, ...patch } : b) }));
+      },
+      deleteBusiness: (businessId) => {
+        setState((prev) => {
+          if (!prev.businesses.some((b) => b.business_id === businessId && b.owner_user_id === prev.currentUserId)) return prev;
+          const businessIds = new Set([businessId]);
+          return {
+            ...prev,
+            businesses: prev.businesses.filter((b) => !businessIds.has(b.business_id)),
+            relationships: prev.relationships.filter((r) => r.business_id !== businessId),
+            customers: prev.customers.filter((c) => c.business_id !== businessId),
+            employees: prev.employees.filter((e) => e.business_id !== businessId),
+            assets: prev.assets.filter((a) => a.business_id !== businessId),
+            sales: prev.sales.filter((x) => x.business_id !== businessId),
+            expenses: prev.expenses.filter((x) => x.business_id !== businessId),
+            requests: prev.requests.filter((x) => x.business_id !== businessId),
+            products: prev.products.filter((x) => x.business_id !== businessId),
+            jobs: prev.jobs.filter((x) => x.business_id !== businessId),
+            quotations: prev.quotations.filter((x) => x.business_id !== businessId),
+            invoices: prev.invoices.filter((x) => x.business_id !== businessId),
+            selectedBusinessId: prev.selectedBusinessId === businessId ? "" : prev.selectedBusinessId,
+          };
+        });
+      },
+      updateCustomer: (customerId, patch) => {
+        setState((prev) => ({ ...prev, customers: prev.customers.map((c) => c.customer_id === customerId ? { ...c, ...patch } : c) }));
+      },
+      deleteCustomer: (customerId) => {
+        setState((prev) => ({ ...prev, customers: prev.customers.filter((c) => c.customer_id !== customerId), ledger: prev.ledger.filter((x) => x.customer_id !== customerId) }));
+      },
+      updateEmployee: (employeeId, patch) => {
+        setState((prev) => ({ ...prev, employees: prev.employees.map((e) => e.employee_id === employeeId ? { ...e, ...patch } : e) }));
+      },
+      deleteEmployee: (employeeId) => {
+        setState((prev) => ({ ...prev, employees: prev.employees.filter((e) => e.employee_id !== employeeId), jobs: prev.jobs.filter((j) => j.employee_id !== employeeId) }));
+      },
+      updateSale: (saleId, patch) => {
+        setState((prev) => ({ ...prev, sales: prev.sales.map((x) => x.sale_id === saleId ? { ...x, ...patch } : x) }));
+      },
+      deleteSale: (saleId) => {
+        setState((prev) => ({ ...prev, sales: prev.sales.filter((x) => x.sale_id !== saleId) }));
+      },
+      updateProduct: (productId, patch) => {
+        setState((prev) => ({ ...prev, products: prev.products.map((p) => p.product_id === productId ? { ...p, ...patch } : p) }));
+      },
+      deleteProduct: (productId) => {
+        setState((prev) => ({ ...prev, products: prev.products.filter((p) => p.product_id !== productId) }));
       },
       addBusiness: async (form) => {
         const business_id = uid("BUS");
@@ -515,74 +609,99 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           ),
         }));
       },
-      addCustomer: (form) => {
-        setState((prev) => {
-          const opening = Number(form.amount || 0);
-          const customer_id = uid("CUS");
-          const email = form.email.trim();
-          let users = prev.users;
-          let relationships = prev.relationships;
-          let userId = "";
-          if (email) {
-            const existing = prev.users.find(
-              (u) => u.email.toLowerCase() === email.toLowerCase(),
-            );
-            userId = existing?.user_id ?? uid("USR");
-            if (!existing) {
-              users = [
-                ...users,
-                {
-                  user_id: userId,
-                  business_id: prev.selectedBusinessId,
-                  name: form.name,
-                  email,
-                  phone: form.phone,
-                  role: "Customer",
-                  account_level: "user",
-                  status: "active",
-                },
-              ];
+      addCustomer: async (form) => {
+        const opening = Number(form.amount || 0);
+        const customer_id = uid("CUS");
+        const email = form.email.trim();
+        let users = state.users;
+        let relationships = state.relationships;
+        let offers = state.offers;
+        let userId = "";
+
+        if (email) {
+          const businessName =
+            state.businesses.find((b) => b.business_id === state.selectedBusinessId)
+              ?.business_name ?? "A business";
+          const relationship_id = uid("REL");
+          const relationship: Relationship = {
+            relationship_id,
+            user_id: "",
+            business_id: state.selectedBusinessId,
+            relationship_type: "customer",
+            role: "Customer",
+            job_status: "Active",
+            status: "pending",
+          };
+          const offer: Offer = {
+            offer_id: uid("OFR"),
+            user_id: "",
+            title: `Customer tab with ${businessName}`,
+            from: businessName,
+            amount: opening,
+            status: "Open",
+            kind: "customer",
+            business_id: state.selectedBusinessId,
+            relationship_id,
+          };
+
+          let linkedUserId = "";
+          try {
+            const inviteResponse = await fetch("/api/relationships/invite", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ targetEmail: email, relationship, offer }),
+            });
+            if (inviteResponse.ok) {
+              const payload = await inviteResponse.json();
+              if (payload.linked) linkedUserId = payload.userId;
             }
+          } catch {
+            // Offline or the invite endpoint failed — fall back to a local-only placeholder below.
+          }
+
+          const existing = state.users.find(
+            (u) => u.email.toLowerCase() === email.toLowerCase(),
+          );
+          // Only create a cross-account relationship when the email belongs to
+          // a real LifeBoost account. The server writes the invitation directly
+          // into that account's private user_state row.
+          userId = linkedUserId || existing?.user_id || "";
+          if (linkedUserId) {
             const hasRel = relationships.some(
               (r) =>
-                r.user_id === userId &&
-                r.business_id === prev.selectedBusinessId &&
+                r.user_id === linkedUserId &&
+                r.business_id === state.selectedBusinessId &&
                 r.relationship_type === "customer",
             );
             if (!hasRel) {
-              relationships = [
-                ...relationships,
-                {
-                  relationship_id: uid("REL"),
-                  user_id: userId,
-                  business_id: prev.selectedBusinessId,
-                  relationship_type: "customer",
-                  role: "Customer",
-                  job_status: "Active",
-                  status: "active",
-                },
-              ];
+              relationships = [...relationships, { ...relationship, user_id: linkedUserId }];
+              offers = [...offers, { ...offer, user_id: linkedUserId }];
             }
+          } else if (existing?.user_id) {
+            userId = existing.user_id;
           }
-          const ledger = [...prev.ledger];
-          if (opening > 0) {
-            ledger.unshift({
-              entry_id: uid("LED"),
-              business_id: prev.selectedBusinessId,
-              customer_id,
-              type: "charge",
-              amount: opening,
-              description: "Opening balance",
-              product_id: "",
-              qty: 0,
-              posted_by: prev.currentUserId,
-              date: new Date().toISOString(),
-            });
-          }
-          return {
+        }
+        const ledger = [...state.ledger];
+        if (opening > 0) {
+          ledger.unshift({
+            entry_id: uid("LED"),
+            business_id: state.selectedBusinessId,
+            customer_id,
+            type: "charge",
+            amount: opening,
+            description: "Opening balance",
+            product_id: "",
+            qty: 0,
+            posted_by: state.currentUserId,
+            date: new Date().toISOString(),
+          });
+        }
+        setState((prev) => ({
             ...prev,
             users,
             relationships,
+            offers,
             ledger,
             customers: [
               ...prev.customers,
@@ -600,54 +719,78 @@ export function LifeProvider({ children }: { children: ReactNode }) {
                 charge_mode: form.charge_mode || "owner",
               },
             ],
-          };
-        });
+        }));
       },
       addEmployee: async (form) => {
         const employee_id = uid("EMP");
         let userId = "";
         let users = state.users;
         let relationships = state.relationships;
+        let offers = state.offers;
 
         if (form.email) {
-          const existing = state.users.find(
-            (u) => u.email.toLowerCase() === form.email.toLowerCase(),
-          );
-          userId = existing?.user_id ?? uid("USR");
-          if (!existing) {
-            users = [
-              ...users,
-              {
-                user_id: userId,
-                business_id: state.selectedBusinessId,
-                name: form.name,
-                email: form.email,
-                phone: form.phone,
-                role: form.role,
-                account_level: "user",
-                status: "active",
-              },
-            ];
+          const email = form.email.trim().toLowerCase();
+          const businessName =
+            state.businesses.find((b) => b.business_id === state.selectedBusinessId)
+              ?.business_name ?? "A business";
+          const relationship_id = uid("REL");
+          const relationship: Relationship = {
+            relationship_id,
+            user_id: "",
+            business_id: state.selectedBusinessId,
+            relationship_type: "employee",
+            role: form.role,
+            job_status: form.jobStatus,
+            status: "pending",
+          };
+          const offer: Offer = {
+            offer_id: uid("OFR"),
+            user_id: "",
+            title: `Employment offer: ${form.role} at ${businessName}`,
+            from: businessName,
+            amount: 0,
+            status: "Open",
+            kind: "employment",
+            business_id: state.selectedBusinessId,
+            relationship_id,
+            role: form.role,
+          };
+
+          let linkedUserId = "";
+          try {
+            const inviteResponse = await fetch("/api/relationships/invite", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ targetEmail: email, relationship, offer }),
+            });
+            if (inviteResponse.ok) {
+              const payload = await inviteResponse.json();
+              if (payload.linked) linkedUserId = payload.userId;
+            }
+          } catch {
+            // Offline or the invite endpoint failed — fall back to a local-only placeholder below.
           }
-          const hasRel = relationships.some(
-            (r) =>
-              r.user_id === userId &&
-              r.business_id === state.selectedBusinessId &&
-              r.relationship_type === "employee",
+
+          const existing = state.users.find(
+            (u) => u.email.toLowerCase() === email,
           );
-          if (!hasRel) {
-            relationships = [
-              ...relationships,
-              {
-                relationship_id: uid("REL"),
-                user_id: userId,
-                business_id: state.selectedBusinessId,
-                relationship_type: "employee",
-                role: form.role,
-                job_status: form.jobStatus,
-                status: "active",
-              },
-            ];
+          // Do not invent a user id when the email is not a registered
+          // LifeBoost account. A real account is linked by the server endpoint.
+          userId = linkedUserId || existing?.user_id || "";
+          if (linkedUserId) {
+            const hasRel = relationships.some(
+              (r) =>
+                r.user_id === linkedUserId &&
+                r.business_id === state.selectedBusinessId &&
+                r.relationship_type === "employee",
+            );
+            if (!hasRel) {
+              relationships = [...relationships, { ...relationship, user_id: linkedUserId }];
+              offers = [...offers, { ...offer, user_id: linkedUserId }];
+            }
+          } else if (existing?.user_id) {
+            userId = existing.user_id;
           }
         }
 
@@ -655,6 +798,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           ...state,
           users,
           relationships,
+          offers,
           employees: [
             ...state.employees,
             {

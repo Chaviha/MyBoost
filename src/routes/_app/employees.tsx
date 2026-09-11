@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { BriefcaseBusiness, Search, Store } from "lucide-react";
+import { BriefcaseBusiness, Search, Store, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
@@ -25,7 +25,7 @@ export const Route = createFileRoute("/_app/employees")({
 });
 
 function EmployeesPage() {
-  const { selectedBusiness, businessEmployees, addEmployee, refreshPublicMarketplace, can } = useLife();
+  const { selectedBusiness, businessEmployees, addEmployee, refreshPublicMarketplace, can, updateEmployee, deleteEmployee } = useLife();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
 
@@ -78,6 +78,20 @@ function EmployeesPage() {
               {employee.salary ? (
                 <span className="text-sm tabular-nums">{money(employee.salary)}</span>
               ) : null}
+              <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onClick={() => {
+                  const name = window.prompt("Professional name", employee.name);
+                  if (name === null) return;
+                  const role = window.prompt("Role", employee.role) ?? employee.role;
+                  const phone = window.prompt("Phone", employee.phone) ?? employee.phone;
+                  updateEmployee(employee.employee_id, { name: name.trim() || employee.name, role, phone });
+                  void refreshPublicMarketplace();
+                  toast.success("Professional updated.");
+                }}><Pencil className="size-3.5" /> Edit</Button>
+                <Button size="sm" variant="secondary" onClick={() => {
+                  if (window.confirm(`Delete ${employee.name}?`)) { deleteEmployee(employee.employee_id); toast.success("Professional deleted."); }
+                }}><Trash2 className="size-3.5" /> Delete</Button>
+              </div>
               {employee.listed ? (
                 <Badge tone="forest">
                   <Store className="size-3" />

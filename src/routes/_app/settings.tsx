@@ -20,7 +20,8 @@ export const Route = createFileRoute("/_app/settings")({
 });
 
 function SettingsPage() {
-  const { currentUser, visibleBusinesses, saveProfile, uploadAvatar, removeAvatar, can } = useLife();
+  const { currentUser, visibleBusinesses, myConnections, saveProfile, uploadAvatar, removeAvatar, can } =
+    useLife();
 
   return (
     <>
@@ -36,7 +37,12 @@ function SettingsPage() {
               <Building2 className="size-3.5" />
               Businesses
             </TabsTrigger>
-          ) : null}
+          ) : (
+            <TabsTrigger value="businesses">
+              <Building2 className="size-3.5" />
+              Connections
+            </TabsTrigger>
+          )}
           <TabsTrigger value="security">
             <ShieldCheck className="size-3.5" />
             Security
@@ -74,7 +80,35 @@ function SettingsPage() {
               ) : null}
             </Card>
           </TabsContent>
-        ) : null}
+        ) : (
+          <TabsContent value="businesses">
+            <Card className="p-5">
+              <h2 className="font-display text-xl font-medium">My connections</h2>
+              <p className="mt-1 mb-4 text-sm text-ink-muted">
+                Businesses you're linked to as an employee or customer. Accept invites from the
+                Offers page to see them here.
+              </p>
+              {myConnections.map(({ relationship, business }) => (
+                <div
+                  key={relationship.relationship_id}
+                  className="flex items-center gap-3 border-b border-line py-3 last:border-0"
+                >
+                  <Building2 className="size-5 text-ink-faint" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">{business?.business_name ?? "Business"}</p>
+                    <p className="text-xs text-ink-muted">{relationship.role}</p>
+                  </div>
+                  <Badge tone="forest" className="capitalize">
+                    {relationship.relationship_type}
+                  </Badge>
+                </div>
+              ))}
+              {myConnections.length === 0 ? (
+                <EmptyState icon={Building2} text="No businesses yet. Check Offers for pending invites." compact />
+              ) : null}
+            </Card>
+          </TabsContent>
+        )}
         <TabsContent value="security">
           <Card className="p-5">
             <h2 className="font-display text-xl font-medium">Security</h2>

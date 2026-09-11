@@ -501,6 +501,256 @@ app.post("/api/public/marketplace/businesses/:businessId/contact", async (req, r
   } catch (error) { next(error); }
 });
 
+app.post("/api/relationships/invite", auth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const targetEmail = String(req.body?.targetEmail || "").trim().toLowerCase();
+    const inputRelationship = req.body?.relationship;
+    const inputOffer = req.body?.offer;
+
+    if (!/^\S+@\S+\.\S+$/.test(targetEmail)) {
+      return res.status(400).json({ error: "Enter a valid email address" });
+    }
+    if (!inputRelationship || typeof inputRelationship !== "object") {
+      return res.status(400).json({ error: "Relationship details are required" });
+    }
+    if (!inputOffer || typeof inputOffer !== "object") {
+      return res.status(400).json({ error: "Offer details are required" });
+    }
+
+    const businessId = String(inputRelationship.business_id || inputOffer.business_id || "").trim();
+    const relationshipType = String(inputRelationship.relationship_type || "").trim();
+    if (!businessId || !["employee", "customer", "supplier"].includes(relationshipType)) {
+      return res.status(400).json({ error: "Invalid relationship details" });
+    }
+
+    // The inviter must actually own the business in their private state.
+    const ownerStateResult = await client.query(
+      "SELECT state FROM user_state WHERE user_id = $1 FOR UPDATE",
+      [req.user.id],
+    );
+    const ownerState = ownerStateResult.rows[0]?.state;
+    const business = Array.isArray(ownerState?.businesses)
+      ? ownerState.businesses.find(
+          (item) => item?.business_id === businessId && item?.owner_user_id === req.user.id,
+        )
+      : null;
+    if (!business) {
+      return res.status(403).json({ error: "You do not own this business" });
+    }
+
+    if (targetEmail === String(req.user.email || "").toLowerCase()) {
+      return res.status(400).json({ error: "You cannot invite your own account" });
+    }
+
+    // IMPORTANT: look up the invitee in the shared users table, not in the
+    // inviter's private users array. Each account has its own user_state row.
+    const targetResult = await client.query(
+      "SELECT * FROM users WHERE LOWER(email) = $1 AND status = 'active' LIMIT 1",
+      [targetEmail],
+    );
+    const targetUser = targetResult.rows[0];
+
+    // The person may not have created a LifeBoost account yet. Do not create
+    // a fake user in the owner's JSON blob; the invite can simply be retried
+    // after the person registers.
+    if (!targetUser) {
+      return res.json({
+        linked: false,
+        userId: "",
+        message: "No active LifeBoost account exists for that email yet.",
+      });
+    }
+
+    const relationshipId = String(inputRelationship.relationship_id || randomUUID());
+    const offerId = String(inputOffer.offer_id || randomUUID());
+    const relationship = {
+      ...inputRelationship,
+      relationship_id: relationshipId,
+      user_id: targetUser.id,
+      business_id: businessId,
+      relationship_type: relationshipType,
+      status: "pending",
+    };
+    const offer = {
+      ...inputOffer,
+      offer_id: offerId,
+      user_id: targetUser.id,
+      business_id: businessId,
+      relationship_id: relationshipId,
+      status: "Open",
+    };
+
+    const targetStateResult = await client.query(
+      "SELECT state FROM user_state WHERE user_id = $1 FOR UPDATE",
+      [targetUser.id],
+    );
+    const targetState = targetStateResult.rows[0]?.state || {
+      currentUserId: targetUser.id,
+      selectedBusinessId: "",
+      users: [],
+      businesses: [],
+      relationships: [],
+      customers: [],
+      ledger: [],
+      employees: [],
+      assets: [],
+      sales: [],
+      expenses: [],
+      requests: [],
+      products: [],
+      jobs: [],
+      quotations: [],
+      invoices: [],
+      income: [],
+      saccos: [],
+      offers: [],
+      liabilities: {},
+    };
+
+    targetState.currentUserId = targetUser.id;
+    targetState.users = Array.isArray(targetState.users) ? targetState.users : [];
+    targetState.businesses = Array.isArray(targetState.businesses) ? targetState.businesses : [];
+    targetState.relationships = Array.isArray(targetState.relationships) ? targetState.relationships : [];
+    targetState.offers = Array.isArray(targetState.offers) ? targetState.offers : [];
+
+    // Give the invitee a read-only copy of the business so the accepted
+    // customer/professional tab has a real business to open. Private owner
+    // accounting data is not copied.
+    const businessIndex = targetState.businesses.findIndex((item) => item?.business_id === businessId);
+    if (businessIndex >= 0) targetState.businesses[businessIndex] = business;
+    else targetState.businesses.push(business);
+
+    // Keep the authenticated account in its own state so the rest of the app
+    // can resolve the relationship by user_id.
+    const targetDto = userDto(targetUser);
+    const existingUserIndex = targetState.users.findIndex((u) => u?.user_id === targetUser.id);
+    if (existingUserIndex >= 0) targetState.users[existingUserIndex] = targetDto;
+    else targetState.users.unshift(targetDto);
+
+    // Upsert by ID so retries do not create duplicate offers/relationships.
+    const relationshipIndex = targetState.relationships.findIndex(
+      (r) => r?.relationship_id === relationshipId,
+    );
+    if (relationshipIndex >= 0) targetState.relationships[relationshipIndex] = relationship;
+    else targetState.relationships.push(relationship);
+
+    const offerIndex = targetState.offers.findIndex((o) => o?.offer_id === offerId);
+    if (offerIndex >= 0) targetState.offers[offerIndex] = offer;
+    else targetState.offers.push(offer);
+
+    await client.query(
+      `INSERT INTO user_state (user_id, state) VALUES ($1,$2)
+       ON CONFLICT (user_id) DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()`,
+      [targetUser.id, JSON.stringify(targetState)],
+    );
+
+    await client.query("COMMIT");
+    res.json({
+      linked: true,
+      userId: targetUser.id,
+      relationshipId,
+      offerId,
+      message: "Invitation and offer delivered to the user's LifeBoost account.",
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
+
+app.post("/api/relationships/respond", auth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const offerId = String(req.body?.offerId || "").trim();
+    const decision = String(req.body?.decision || "").trim().toLowerCase();
+    if (!offerId || !["accepted", "declined"].includes(decision)) {
+      return res.status(400).json({ error: "Offer and decision are required" });
+    }
+
+    await client.query("BEGIN");
+    const result = await client.query("SELECT state FROM user_state WHERE user_id = $1 FOR UPDATE", [req.user.id]);
+    const state = result.rows[0]?.state || {};
+    state.offers = Array.isArray(state.offers) ? state.offers : [];
+    state.relationships = Array.isArray(state.relationships) ? state.relationships : [];
+    state.customers = Array.isArray(state.customers) ? state.customers : [];
+    state.employees = Array.isArray(state.employees) ? state.employees : [];
+
+    const offer = state.offers.find((item) => item?.offer_id === offerId);
+    if (!offer || String(offer.user_id) !== String(req.user.id)) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Offer not found" });
+    }
+    const relationship = offer.relationship_id
+      ? state.relationships.find((item) => item?.relationship_id === offer.relationship_id)
+      : null;
+
+    if (decision === "declined") {
+      state.offers = state.offers.map((item) => item.offer_id === offerId ? { ...item, status: "Declined" } : item);
+      if (relationship) {
+        state.relationships = state.relationships.map((item) => item.relationship_id === relationship.relationship_id ? { ...item, status: "declined" } : item);
+      }
+    } else {
+      state.offers = state.offers.map((item) => item.offer_id === offerId ? { ...item, status: "Accepted" } : item);
+      if (relationship) {
+        state.relationships = state.relationships.map((item) => item.relationship_id === relationship.relationship_id ? { ...item, status: "active" } : item);
+
+        const me = await client.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
+        const user = me.rows[0];
+        const businessId = relationship.business_id || offer.business_id || "";
+        if (relationship.relationship_type === "customer") {
+          const existing = state.customers.find((item) => item?.user_id === req.user.id && item?.business_id === businessId);
+          if (!existing) {
+            state.customers.push({
+              customer_id: `CUS-${randomUUID()}`,
+              business_id: businessId,
+              name: user?.name || req.user.email,
+              phone: user?.phone || "",
+              email: user?.email || req.user.email,
+              amount: Number(offer.amount || 0),
+              due_date: "",
+              type: "Customer",
+              status: Number(offer.amount || 0) > 0 ? "Pending" : "Paid",
+              user_id: req.user.id,
+              charge_mode: "both",
+            });
+          }
+        } else if (relationship.relationship_type === "employee") {
+          const existing = state.employees.find((item) => item?.user_id === req.user.id && item?.business_id === businessId);
+          if (!existing) {
+            state.employees.push({
+              employee_id: `EMP-${randomUUID()}`,
+              business_id: businessId,
+              name: user?.name || req.user.email,
+              phone: user?.phone || "",
+              email: user?.email || req.user.email,
+              role: relationship.role || offer.role || "Professional",
+              job_status: "Active",
+              salary: 0,
+              status: "active",
+              user_id: req.user.id,
+              listed: false,
+              location: "",
+              views: 0,
+              whatsapp_clicks: 0,
+            });
+          }
+        }
+      }
+    }
+
+    await client.query("UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2", [JSON.stringify(state), req.user.id]);
+    await client.query("COMMIT");
+    res.json({ ok: true, state });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    next(error);
+  } finally { client.release(); }
+});
+
 app.get("/api/state", auth, async (req, res, next) => {
   try {
     const result = await pool.query("SELECT state FROM user_state WHERE user_id = $1", [req.user.id]);

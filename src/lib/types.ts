@@ -233,6 +233,8 @@ export type Sacco = {
   contribution: number;
 };
 
+export type OfferKind = "employment" | "customer" | "general";
+
 export type Offer = {
   offer_id: string;
   user_id: string;
@@ -240,6 +242,10 @@ export type Offer = {
   from: string;
   amount: number;
   status: string;
+  kind?: OfferKind;
+  business_id?: string;
+  relationship_id?: string;
+  role?: string;
 };
 
 export type LifeState = {

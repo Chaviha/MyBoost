@@ -149,13 +149,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   } = useLife();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    home: true,
-    business: true,
-    professional: true,
-    customer: true,
-    finance: true,
-    admin: true,
-    account: true,
+    home: false,
+    business: false,
+    professional: false,
+    customer: false,
+    finance: false,
+    admin: false,
+    account: false,
   });
   const kindLabel = workspaceLabel(currentUser, state.relationships);
 
@@ -173,6 +173,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       })).filter((group) => group.items.length > 0),
     [allow, myTabs.length, workspace],
   );
+
+  const openMenu = () => {
+    setMobileOpen(true);
+  };
 
   const mobileTabs = useMemo(() => {
     if (workspace === "admin") {
@@ -325,11 +329,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="lg:ml-64">
-        <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-line bg-canvas/90 px-4 py-3 backdrop-blur-sm">
+        <header className="fixed inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-line bg-canvas/90 px-4 py-3 backdrop-blur-sm lg:left-64">
           <button
             type="button"
             className="flex size-11 items-center justify-center rounded-md text-ink lg:hidden"
-            onClick={() => setMobileOpen(true)}
+            onClick={openMenu}
             aria-label="Open menu"
           >
             <Menu className="size-5" />
@@ -363,6 +367,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             className="shadow-border"
           />
         </header>
+        <div className="h-[68px]" aria-hidden />
 
         {showSwitcher ? (
           <div className="border-b border-line px-4 py-2 sm:hidden">
@@ -401,7 +406,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         ))}
         <button
           type="button"
-          onClick={() => setMobileOpen(true)}
+          onClick={openMenu}
           className="flex min-h-14 flex-col items-center justify-center gap-0.5 text-[10px] text-ink-muted"
         >
           <Menu className="size-4" />

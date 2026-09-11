@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Boxes } from "lucide-react";
+import { Boxes, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
@@ -24,7 +24,7 @@ export const Route = createFileRoute("/_app/products")({
 });
 
 function ProductsPage() {
-  const { selectedBusiness, businessProducts, addProduct, can } = useLife();
+  const { selectedBusiness, businessProducts, addProduct, can, updateProduct, deleteProduct } = useLife();
   const [open, setOpen] = useState(false);
 
   if (!can("view_products")) {
@@ -61,6 +61,21 @@ function ProductsPage() {
               <p className="text-xs text-ink-muted">
                 Cost {money(p.cost_price)} · {p.stock} in stock
               </p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onClick={() => {
+                  const name = window.prompt("Product name", p.name);
+                  if (name === null) return;
+                  const priceText = window.prompt("Selling price", String(p.selling_price));
+                  if (priceText === null) return;
+                  const stockText = window.prompt("Stock", String(p.stock));
+                  if (stockText === null) return;
+                  updateProduct(p.product_id, { name: name.trim() || p.name, selling_price: Number(priceText) || 0, stock: Number(stockText) || 0 });
+                  toast.success("Product updated.");
+                }}><Pencil className="size-3.5" /> Edit</Button>
+                <Button size="sm" variant="secondary" onClick={() => {
+                  if (window.confirm(`Delete ${p.name}?`)) { deleteProduct(p.product_id); toast.success("Product deleted."); }
+                }}><Trash2 className="size-3.5" /> Delete</Button>
+              </div>
               <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-line">
                 <div
                   className="h-full rounded-full bg-forest"

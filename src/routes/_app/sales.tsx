@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { CreditCard, Search, Wallet } from "lucide-react";
+import { CreditCard, Search, Wallet, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
@@ -26,7 +26,7 @@ export const Route = createFileRoute("/_app/sales")({
 });
 
 function SalesPage() {
-  const { selectedBusiness, businessSales, addSale, can } = useLife();
+  const { selectedBusiness, businessSales, addSale, can, updateSale, deleteSale } = useLife();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
 
@@ -86,6 +86,19 @@ function SalesPage() {
               <Badge tone={sale.status.toLowerCase() === "completed" ? "forest" : "amber"}>
                 {sale.status}
               </Badge>
+              <div className="flex gap-1">
+                <Button size="sm" variant="ghost" onClick={() => {
+                  const customer_name = window.prompt("Customer", sale.customer_name || "Walk-in");
+                  if (customer_name === null) return;
+                  const totalText = window.prompt("Total", String(sale.total));
+                  if (totalText === null) return;
+                  updateSale(sale.sale_id, { customer_name, total: Number(totalText) || 0, subtotal: Number(totalText) || 0 });
+                  toast.success("Sale updated.");
+                }}><Pencil className="size-3.5" /></Button>
+                <Button size="sm" variant="ghost" onClick={() => {
+                  if (window.confirm(`Delete sale ${sale.sale_id}?`)) { deleteSale(sale.sale_id); toast.success("Sale deleted."); }
+                }}><Trash2 className="size-3.5" /></Button>
+              </div>
             </div>
           ))
         )}
