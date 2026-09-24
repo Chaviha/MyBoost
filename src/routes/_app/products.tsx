@@ -38,7 +38,7 @@ function ProductsPage() {
     <>
       <Toolbar
         title="Products"
-        subtitle={`What ${selectedBusiness.business_name} sells. Charges on a customer tab can pick from this list.`}
+        subtitle={`What ${selectedBusiness.business_name} sells. Charges on a customer tab, and any quotation across LifeBoost, can pick from listed items.`}
         actionLabel="Add product"
         onAction={() => setOpen(true)}
       />
@@ -50,7 +50,12 @@ function ProductsPage() {
             <Card key={p.product_id} className="flex flex-col gap-2 p-5">
               <div className="flex items-start justify-between gap-2">
                 <h3 className="font-display text-lg font-medium tracking-tight">{p.name}</h3>
-                <Badge>{p.category || p.unit}</Badge>
+                <div className="flex gap-1.5">
+                  <Badge>{p.category || p.unit}</Badge>
+                  <Badge tone={p.listed ? "forest" : "neutral"}>
+                    {p.listed ? "Listed" : "Unlisted"}
+                  </Badge>
+                </div>
               </div>
               <p className="font-display text-xl font-medium tabular-nums">
                 {money(p.selling_price)}
@@ -75,6 +80,16 @@ function ProductsPage() {
                 <Button size="sm" variant="secondary" onClick={() => {
                   if (window.confirm(`Delete ${p.name}?`)) { deleteProduct(p.product_id); toast.success("Product deleted."); }
                 }}><Trash2 className="size-3.5" /> Delete</Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    updateProduct(p.product_id, { listed: !p.listed });
+                    toast.success(p.listed ? "Unlisted from quotations." : "Listed for quotations across LifeBoost.");
+                  }}
+                >
+                  {p.listed ? "Unlist" : "List for quotations"}
+                </Button>
               </div>
               <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-line">
                 <div
@@ -118,6 +133,7 @@ function ProductForm({
     sellingPrice: string;
     costPrice: string;
     stock: string;
+    listed: boolean;
   }) => void;
 }) {
   const [form, setForm] = useState({
@@ -127,6 +143,7 @@ function ProductForm({
     sellingPrice: "",
     costPrice: "",
     stock: "",
+    listed: true,
   });
   return (
     <form
@@ -181,6 +198,14 @@ function ProductForm({
           onChange={(e) => setForm({ ...form, stock: e.target.value })}
         />
       </Field>
+      <label className="mb-3 flex items-center gap-2 text-sm text-ink-muted">
+        <input
+          type="checkbox"
+          checked={form.listed}
+          onChange={(e) => setForm({ ...form, listed: e.target.checked })}
+        />
+        List for quotations across LifeBoost (any business doing a quote can suggest this)
+      </label>
       <div className="mt-4 flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel

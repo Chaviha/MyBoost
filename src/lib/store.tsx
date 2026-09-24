@@ -36,6 +36,7 @@ import type {
   JobStatus,
   LedgerEntry,
   LifeState,
+  MarketplaceProduct,
   MediaItem,
   MoneyRequest,
   Offer,
@@ -94,7 +95,8 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     businesses: Business[];
     professionals: Array<Record<string, unknown>>;
     assets: Array<Record<string, unknown>>;
-  }>({ businesses: [], professionals: [], assets: [] });
+    products: MarketplaceProduct[];
+  }>({ businesses: [], professionals: [], assets: [], products: [] });
 
   const refreshPublicMarketplace = async (): Promise<boolean> => {
     try {
@@ -108,6 +110,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         businesses: Array.isArray(payload.businesses) ? payload.businesses : [],
         professionals: Array.isArray(payload.professionals) ? payload.professionals : [],
         assets: Array.isArray(payload.assets) ? payload.assets : [],
+        products: Array.isArray(payload.products) ? payload.products : [],
       });
       return true;
     } catch {
@@ -928,6 +931,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               cost_price: Number(form.costPrice || 0),
               stock: Number(form.stock || 0),
               status: "active",
+              listed: Boolean(form.listed),
             },
           ],
         }));
@@ -977,6 +981,10 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       addQuotation: (form) => {
         setState((prev) => {
           const customer = prev.customers.find((c) => c.customer_id === form.customerId);
+          const pricingBusiness = form.pricingBusinessId
+            ? prev.businesses.find((b) => b.business_id === form.pricingBusinessId)
+            : undefined;
+          const lineItemsTotal = (form.lineItems || []).reduce((s, li) => s + Number(li.amount || 0), 0);
           return {
             ...prev,
             quotations: [
@@ -985,10 +993,14 @@ export function LifeProvider({ children }: { children: ReactNode }) {
                 business_id: prev.selectedBusinessId,
                 customer_id: form.customerId,
                 customer_name: customer?.name ?? "Customer",
-                total: Number(form.total || 0),
+                total: form.lineItems?.length ? lineItemsTotal : Number(form.total || 0),
                 status: "Sent",
                 date: new Date().toISOString(),
                 notes: form.notes,
+                quote_type: form.quoteType || "general",
+                pricing_business_id: form.pricingBusinessId,
+                pricing_business_name: pricingBusiness?.business_name,
+                line_items: form.lineItems,
               },
               ...prev.quotations,
             ],
@@ -1321,7 +1333,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         setState(buildSeed());
       },
     };
-  }, [state, authenticated, authLoading]);
+  }, [state, authenticated, authLoading, publicMarketplace]);
 
   return <LifeContext.Provider value={api}>{children}</LifeContext.Provider>;
 }

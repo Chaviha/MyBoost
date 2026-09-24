@@ -138,8 +138,9 @@ app.post("/api/auth/login", async (req, res, next) => {
     const password = String(req.body.password || "");
     const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
     const user = result.rows[0];
-    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
-      return res.status(401).json({ error: "Invalid email or password" });
+    if (!user) return res.status(401).json({ error: "No account found with that email." });
+    if (!(await bcrypt.compare(password, user.password_hash))) {
+      return res.status(401).json({ error: "Incorrect password. Try again." });
     }
     if (user.status !== "active") return res.status(403).json({ error: "This account is not active" });
     const token = await createSession(user.id);
@@ -174,15 +175,33 @@ app.post("/api/auth/forgot-password", async (req, res, next) => {
     );
     const base = process.env.APP_URL || `http://localhost:8080`;
     const resetUrl = `${base}/?reset=${encodeURIComponent(raw)}`;
+    let emailSent = false;
     if (mailer) {
-      await mailer.sendMail({
-        from: process.env.SMTP_FROM || "LifeBoost <no-reply@lifeboost.ke>",
-        to: email,
-        subject: "Reset your LifeBoost password",
-        text: `Reset your LifeBoost password using this link. It expires in ${RESET_MINUTES} minutes: ${resetUrl}`,
-        html: `<p>Reset your LifeBoost password.</p><p><a href="${resetUrl}">Reset password</a></p><p>This link expires in ${RESET_MINUTES} minutes and can only be used once.</p>`,
-      });
-    } else if (!isProduction || process.env.LOG_RESET_LINKS === "true") {
+      // A broken SMTP provider (bad creds, blocked port, etc.) must not fail the
+      // whole request — the token is already issued, and the response to the
+      // client is the same either way to avoid leaking whether the email exists.
+      try {
+        await mailer.sendMail({
+          from: process.env.SMTP_FROM || "LifeBoost <no-reply@lifeboost.ke>",
+          to: email,
+          subject: "Reset your LifeBoost password",
+          text: `Reset your LifeBoost password using this link. It expires in ${RESET_MINUTES} minutes: ${resetUrl}`,
+          html: `<p>Reset your LifeBoost password.</p><p><a href="${resetUrl}">Reset password</a></p><p>This link expires in ${RESET_MINUTES} minutes and can only be used once.</p>`,
+        });
+        emailSent = true;
+      } catch (sendError) {
+        console.error(`Failed to send password reset email to ${email}:`, sendError.message || sendError);
+      }
+    } else {
+      // Most common cause of "reset emails never arrive": SMTP_HOST/PORT/USER/PASSWORD
+      // were never set on this deployment. Always log this — not just outside
+      // production — so it shows up in Railway logs instead of failing silently.
+      console.warn(
+        "Password reset requested but SMTP is not configured (SMTP_HOST is unset) — no email was sent. " +
+          "Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD and SMTP_FROM to enable email delivery.",
+      );
+    }
+    if (!emailSent && (!isProduction || process.env.LOG_RESET_LINKS === "true")) {
       console.log(`Password reset link for ${email}: ${resetUrl}`);
     }
     res.json({ message: "If that email exists, a reset link has been prepared.", ...(process.env.RETURN_RESET_LINK === "true" ? { resetUrl } : {}) });
@@ -414,10 +433,15 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
     const businesses = [];
     const professionals = [];
     const assets = [];
+    const products = [];
+    const demoBusinessIds = new Set(["BUS001", "BUS002"]);
+    const demoBusinessNames = new Set(["Felix Hardware", "Garden Kitchen"]);
+    const demoProductIds = new Set(["PRD001", "PRD002"]);
 
     for (const row of result.rows) {
       const state = row.state || {};
-      const listedBusinesses = Array.isArray(state.businesses) ? state.businesses.filter((b) => b?.listed && !["BUS001", "BUS002"].includes(b.business_id) && !["Felix Hardware", "Garden Kitchen"].includes(b.business_name)) : [];
+      const allBusinesses = Array.isArray(state.businesses) ? state.businesses : [];
+      const listedBusinesses = allBusinesses.filter((b) => b?.listed && !demoBusinessIds.has(b.business_id) && !demoBusinessNames.has(b.business_name));
       for (const business of listedBusinesses) {
         businesses.push({
           business_id: business.business_id,
@@ -466,9 +490,33 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
           });
         }
       }
+
+      // Products power cross-business quotation pricing (steel, DXF cut, materials —
+      // any sector). A product can be listed for quotation use even if its business
+      // has not opted into the public directory, so we resolve names off every
+      // business the account owns, not just `listedBusinesses`.
+      const businessNameById = new Map(allBusinesses.map((b) => [b.business_id, b.business_name]));
+      for (const product of Array.isArray(state.products) ? state.products : []) {
+        if (
+          product?.listed &&
+          product.status !== "inactive" &&
+          !demoBusinessIds.has(product.business_id) &&
+          !demoProductIds.has(product.product_id)
+        ) {
+          products.push({
+            product_id: product.product_id,
+            business_id: product.business_id,
+            business_name: businessNameById.get(product.business_id) || "",
+            name: product.name,
+            category: product.category || "",
+            unit: product.unit || "unit",
+            selling_price: Number(product.selling_price || 0),
+          });
+        }
+      }
     }
 
-    res.json({ businesses, professionals, assets });
+    res.json({ businesses, professionals, assets, products });
   } catch (error) {
     next(error);
   }
@@ -749,6 +797,182 @@ app.post("/api/relationships/respond", auth, async (req, res, next) => {
     await client.query("ROLLBACK").catch(() => {});
     next(error);
   } finally { client.release(); }
+});
+
+
+// Shared Meetings & Discussions. Meetings live in their own tables so invited
+// participants can see the same meeting even though LifeBoost business data
+// remains in each user's private state JSON.
+async function canAccessMeeting(meetingId, userId) {
+  const result = await pool.query(
+    `SELECT * FROM meetings
+     WHERE id = $1 AND (organizer_user_id = $2 OR participant_user_ids ? $2::text)`,
+    [meetingId, userId],
+  );
+  return result.rows[0] || null;
+}
+
+async function meetingPayload(meeting) {
+  const ids = Array.isArray(meeting.participant_user_ids) ? meeting.participant_user_ids : [];
+  const participants = ids.length
+    ? (await pool.query(
+        "SELECT id AS user_id, name, email, avatar_url FROM users WHERE id = ANY($1::uuid[]) ORDER BY name",
+        [ids],
+      )).rows
+    : [];
+  return {
+    meeting_id: meeting.id,
+    organizer_user_id: meeting.organizer_user_id,
+    organizer_name: meeting.organizer_name || "",
+    organizer_email: meeting.organizer_email || "",
+    title: meeting.title,
+    agenda: meeting.agenda || "",
+    start_at: meeting.start_at,
+    duration_minutes: Number(meeting.duration_minutes || 60),
+    status: meeting.status,
+    meeting_url: meeting.meeting_url || "",
+    notes: meeting.notes || "",
+    decisions: meeting.decisions || "",
+    action_items: Array.isArray(meeting.action_items) ? meeting.action_items : [],
+    participants,
+    created_at: meeting.created_at,
+    updated_at: meeting.updated_at,
+  };
+}
+
+app.get("/api/meetings", auth, async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT m.*, u.name AS organizer_name, u.email AS organizer_email
+       FROM meetings m
+       JOIN users u ON u.id = m.organizer_user_id
+       WHERE m.organizer_user_id = $1 OR m.participant_user_ids ? $1::text
+       ORDER BY m.start_at DESC`,
+      [req.user.id],
+    );
+    const meetings = [];
+    for (const meeting of result.rows) meetings.push(await meetingPayload(meeting));
+    res.json({ meetings });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/meetings", auth, async (req, res, next) => {
+  try {
+    const title = String(req.body?.title || "").trim();
+    const agenda = String(req.body?.agenda || "").trim();
+    const startAt = String(req.body?.startAt || "").trim();
+    const duration = Math.max(15, Math.min(480, Number(req.body?.durationMinutes || 60)));
+    const rawEmails = Array.isArray(req.body?.participantEmails) ? req.body.participantEmails : [];
+    const emails = [...new Set(rawEmails.map((email) => String(email).trim().toLowerCase()).filter(Boolean))];
+
+    if (title.length < 2) return res.status(400).json({ error: "Meeting title is required" });
+    if (!startAt || Number.isNaN(new Date(startAt).getTime())) return res.status(400).json({ error: "A valid meeting date and time is required" });
+
+    const usersResult = emails.length
+      ? await pool.query("SELECT id, name, email, avatar_url FROM users WHERE email = ANY($1::text[])", [emails])
+      : { rows: [] };
+    const found = usersResult.rows;
+    const foundEmails = new Set(found.map((u) => String(u.email).toLowerCase()));
+    const missing = emails.filter((email) => !foundEmails.has(email));
+    if (missing.length) {
+      return res.status(400).json({ error: `These emails are not registered LifeBoost accounts: ${missing.join(", ")}` });
+    }
+
+    const participantIds = found
+      .map((u) => String(u.id))
+      .filter((id) => id !== String(req.user.id));
+
+    const meetingId = randomUUID();
+    const meetingUrl = `https://meet.jit.si/LifeBoost-${meetingId.replaceAll("-", "")}`;
+    const result = await pool.query(
+      `INSERT INTO meetings
+       (id, organizer_user_id, title, agenda, start_at, duration_minutes, meeting_url, participant_user_ids)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+       RETURNING *`,
+      [meetingId, req.user.id, title, agenda, startAt, duration, meetingUrl, JSON.stringify(participantIds)],
+    );
+    const meeting = result.rows[0];
+    meeting.organizer_name = req.user.name;
+    meeting.organizer_email = req.user.email;
+    res.status(201).json({ meeting: await meetingPayload(meeting) });
+  } catch (error) { next(error); }
+});
+
+app.patch("/api/meetings/:meetingId", auth, async (req, res, next) => {
+  try {
+    const meeting = await canAccessMeeting(req.params.meetingId, req.user.id);
+    if (!meeting) return res.status(404).json({ error: "Meeting not found" });
+
+    const updates = {};
+    if (req.body?.title !== undefined) updates.title = String(req.body.title).trim();
+    if (req.body?.agenda !== undefined) updates.agenda = String(req.body.agenda);
+    if (req.body?.startAt !== undefined) updates.start_at = String(req.body.startAt);
+    if (req.body?.durationMinutes !== undefined) updates.duration_minutes = Math.max(15, Math.min(480, Number(req.body.durationMinutes)));
+    if (req.body?.status !== undefined && ["Scheduled","In progress","Completed","Cancelled"].includes(String(req.body.status))) updates.status = String(req.body.status);
+    if (req.body?.notes !== undefined) updates.notes = String(req.body.notes);
+    if (req.body?.decisions !== undefined) updates.decisions = String(req.body.decisions);
+    if (req.body?.actionItems !== undefined) {
+      updates.action_items = JSON.stringify(Array.isArray(req.body.actionItems) ? req.body.actionItems : []);
+    }
+    if (!Object.keys(updates).length) return res.status(400).json({ error: "Nothing to update" });
+    if (updates.title !== undefined && updates.title.length < 2) return res.status(400).json({ error: "Meeting title is required" });
+
+    const sets = [];
+    const values = [];
+    let index = 1;
+    for (const [key, value] of Object.entries(updates)) {
+      sets.push(`${key} = $${index++}${key === "action_items" ? "::jsonb" : ""}`);
+      values.push(value);
+    }
+    values.push(req.params.meetingId);
+    const result = await pool.query(
+      `UPDATE meetings SET ${sets.join(", ")}, updated_at = NOW()
+       WHERE id = $${index} RETURNING *`,
+      values,
+    );
+    const updated = result.rows[0];
+    const organizer = await pool.query("SELECT name,email FROM users WHERE id=$1", [updated.organizer_user_id]);
+    updated.organizer_name = organizer.rows[0]?.name || "";
+    updated.organizer_email = organizer.rows[0]?.email || "";
+    res.json({ meeting: await meetingPayload(updated) });
+  } catch (error) { next(error); }
+});
+
+app.get("/api/meetings/:meetingId/messages", auth, async (req, res, next) => {
+  try {
+    const meeting = await canAccessMeeting(req.params.meetingId, req.user.id);
+    if (!meeting) return res.status(404).json({ error: "Meeting not found" });
+    const result = await pool.query(
+      `SELECT mm.id AS message_id, mm.body, mm.created_at, u.id AS user_id, u.name, u.email, u.avatar_url
+       FROM meeting_messages mm JOIN users u ON u.id = mm.user_id
+       WHERE mm.meeting_id = $1 ORDER BY mm.created_at ASC`,
+      [req.params.meetingId],
+    );
+    res.json({ messages: result.rows });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/meetings/:meetingId/messages", auth, async (req, res, next) => {
+  try {
+    const meeting = await canAccessMeeting(req.params.meetingId, req.user.id);
+    if (!meeting) return res.status(404).json({ error: "Meeting not found" });
+    const body = String(req.body?.body || "").trim();
+    if (!body) return res.status(400).json({ error: "Discussion message cannot be empty" });
+    const result = await pool.query(
+      `INSERT INTO meeting_messages (meeting_id, user_id, body) VALUES ($1,$2,$3)
+       RETURNING id AS message_id, body, created_at`,
+      [req.params.meetingId, req.user.id, body],
+    );
+    res.status(201).json({
+      message: {
+        ...result.rows[0],
+        user_id: req.user.id,
+        name: req.user.name,
+        email: req.user.email,
+        avatar_url: req.user.avatar_url || "",
+      },
+    });
+  } catch (error) { next(error); }
 });
 
 app.get("/api/state", auth, async (req, res, next) => {

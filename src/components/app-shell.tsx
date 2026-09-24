@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   ListChecks,
   Menu,
+  MessageSquare,
   PiggyBank,
   Receipt,
   Send,
@@ -57,6 +58,13 @@ const NAV: NavGroup[] = [
     items: [
       { to: "/", label: "Overview", icon: LayoutDashboard },
       { to: "/marketplace", label: "Marketplace", icon: Store, perm: "view_marketplace" },
+    ],
+  },
+  {
+    id: "collaboration",
+    section: "Collaboration",
+    items: [
+      { to: "/meetings", label: "Meetings & discussions", icon: MessageSquare },
     ],
   },
   {
@@ -150,6 +158,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     home: false,
+    collaboration: false,
     business: false,
     professional: false,
     customer: false,

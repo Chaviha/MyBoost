@@ -179,6 +179,23 @@ export type Product = {
   cost_price: number;
   stock: number;
   status: string;
+  /** when true, this product is offered up across LifeBoost for anyone building a
+   * quotation — any sector, not just this product's own business — via the public
+   * marketplace endpoint. */
+  listed?: boolean;
+};
+
+/** A listed product as returned by the cross-account /api/public/marketplace feed.
+ * This is the catalog quotations search against — spans every business on LifeBoost,
+ * regardless of sector (steel, agriculture, construction, etc). */
+export type MarketplaceProduct = {
+  product_id: string;
+  business_id: string;
+  business_name: string;
+  name: string;
+  category: string;
+  unit: string;
+  selling_price: number;
 };
 
 export type Job = {
@@ -194,6 +211,28 @@ export type Job = {
   status: JobStatus;
 };
 
+export type QuoteType = "general" | "steel" | "dxf_cut" | "concrete" | "custom_product";
+
+export type QuoteLineItem = {
+  line_id: string;
+  description: string;
+  qty: number;
+  unit: string;
+  rate: number;
+  amount: number;
+  /** product_id of the matched/selected catalog item this rate came from, if any */
+  source_product_id?: string;
+  /** which business's catalog this item was priced from (may differ per line item
+   * now that quotes can pull from any listed business, any sector) */
+  source_business_id?: string;
+  source_business_name?: string;
+  /** true when the person overrode the suggested price/description instead of
+   * taking the catalog match as-is */
+  customized?: boolean;
+  /** free-form spec details (grade, dims, material, thickness, cut length, etc.) for display */
+  meta?: Record<string, string | number>;
+};
+
 export type Quotation = {
   quote_id: string;
   business_id: string;
@@ -203,6 +242,11 @@ export type Quotation = {
   status: string;
   date: string;
   notes: string;
+  quote_type: QuoteType;
+  /** business whose product catalog supplied the pricing (may differ from business_id) */
+  pricing_business_id?: string;
+  pricing_business_name?: string;
+  line_items?: QuoteLineItem[];
 };
 
 export type Invoice = {
