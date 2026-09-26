@@ -13,11 +13,13 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
 import { Route as AppBusinessesRouteImport } from './routes/_app/businesses'
+import { Route as AppCategoriesRouteImport } from './routes/_app/categories'
 import { Route as AppCollectionsRouteImport } from './routes/_app/collections'
 import { Route as AppCustomersRouteImport } from './routes/_app/customers'
 import { Route as AppEmployeesRouteImport } from './routes/_app/employees'
 import { Route as AppExpensesRouteImport } from './routes/_app/expenses'
 import { Route as AppIncomeRouteImport } from './routes/_app/income'
+import { Route as AppInventoryRouteImport } from './routes/_app/inventory'
 import { Route as AppInvoicesRouteImport } from './routes/_app/invoices'
 import { Route as AppJobsRouteImport } from './routes/_app/jobs'
 import { Route as AppMarketplaceRouteImport } from './routes/_app/marketplace'
@@ -28,9 +30,12 @@ import { Route as AppQuotationsRouteImport } from './routes/_app/quotations'
 import { Route as AppRequestsRouteImport } from './routes/_app/requests'
 import { Route as AppSaccoRouteImport } from './routes/_app/sacco'
 import { Route as AppSalesRouteImport } from './routes/_app/sales'
+import { Route as AppServicesRouteImport } from './routes/_app/services'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppSpecificationsRouteImport } from './routes/_app/specifications'
 import { Route as AppTabRouteImport } from './routes/_app/tab'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
+import { Route as AppVariantsRouteImport } from './routes/_app/variants'
 import { Route as AppWorkRouteImport } from './routes/_app/work'
 
 const AppRoute = AppRouteImport.update({
@@ -50,6 +55,11 @@ const AppAssetsRoute = AppAssetsRouteImport.update({
 const AppBusinessesRoute = AppBusinessesRouteImport.update({
   id: '/businesses',
   path: '/businesses',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCategoriesRoute = AppCategoriesRouteImport.update({
+  id: '/categories',
+  path: '/categories',
   getParentRoute: () => AppRoute,
 } as any)
 const AppCollectionsRoute = AppCollectionsRouteImport.update({
@@ -75,6 +85,11 @@ const AppExpensesRoute = AppExpensesRouteImport.update({
 const AppIncomeRoute = AppIncomeRouteImport.update({
   id: '/income',
   path: '/income',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppInventoryRoute = AppInventoryRouteImport.update({
+  id: '/inventory',
+  path: '/inventory',
   getParentRoute: () => AppRoute,
 } as any)
 const AppInvoicesRoute = AppInvoicesRouteImport.update({
@@ -127,9 +142,19 @@ const AppSalesRoute = AppSalesRouteImport.update({
   path: '/sales',
   getParentRoute: () => AppRoute,
 } as any)
+const AppServicesRoute = AppServicesRouteImport.update({
+  id: '/services',
+  path: '/services',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSpecificationsRoute = AppSpecificationsRouteImport.update({
+  id: '/specifications',
+  path: '/specifications',
   getParentRoute: () => AppRoute,
 } as any)
 const AppTabRoute = AppTabRouteImport.update({
@@ -142,6 +167,11 @@ const AppUsersRoute = AppUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AppRoute,
 } as any)
+const AppVariantsRoute = AppVariantsRouteImport.update({
+  id: '/variants',
+  path: '/variants',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppWorkRoute = AppWorkRouteImport.update({
   id: '/work',
   path: '/work',
@@ -152,11 +182,13 @@ export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/assets': typeof AppAssetsRoute
   '/businesses': typeof AppBusinessesRoute
+  '/categories': typeof AppCategoriesRoute
   '/collections': typeof AppCollectionsRoute
   '/customers': typeof AppCustomersRoute
   '/employees': typeof AppEmployeesRoute
   '/expenses': typeof AppExpensesRoute
   '/income': typeof AppIncomeRoute
+  '/inventory': typeof AppInventoryRoute
   '/invoices': typeof AppInvoicesRoute
   '/jobs': typeof AppJobsRoute
   '/marketplace': typeof AppMarketplaceRoute
@@ -167,19 +199,24 @@ export interface FileRoutesByFullPath {
   '/requests': typeof AppRequestsRoute
   '/sacco': typeof AppSaccoRoute
   '/sales': typeof AppSalesRoute
+  '/services': typeof AppServicesRoute
   '/settings': typeof AppSettingsRoute
+  '/specifications': typeof AppSpecificationsRoute
   '/tab': typeof AppTabRoute
   '/users': typeof AppUsersRoute
+  '/variants': typeof AppVariantsRoute
   '/work': typeof AppWorkRoute
 }
 export interface FileRoutesByTo {
   '/assets': typeof AppAssetsRoute
   '/businesses': typeof AppBusinessesRoute
+  '/categories': typeof AppCategoriesRoute
   '/collections': typeof AppCollectionsRoute
   '/customers': typeof AppCustomersRoute
   '/employees': typeof AppEmployeesRoute
   '/expenses': typeof AppExpensesRoute
   '/income': typeof AppIncomeRoute
+  '/inventory': typeof AppInventoryRoute
   '/invoices': typeof AppInvoicesRoute
   '/jobs': typeof AppJobsRoute
   '/marketplace': typeof AppMarketplaceRoute
@@ -190,9 +227,12 @@ export interface FileRoutesByTo {
   '/requests': typeof AppRequestsRoute
   '/sacco': typeof AppSaccoRoute
   '/sales': typeof AppSalesRoute
+  '/services': typeof AppServicesRoute
   '/settings': typeof AppSettingsRoute
+  '/specifications': typeof AppSpecificationsRoute
   '/tab': typeof AppTabRoute
   '/users': typeof AppUsersRoute
+  '/variants': typeof AppVariantsRoute
   '/work': typeof AppWorkRoute
   '/': typeof AppIndexRoute
 }
@@ -201,11 +241,13 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/_app/assets': typeof AppAssetsRoute
   '/_app/businesses': typeof AppBusinessesRoute
+  '/_app/categories': typeof AppCategoriesRoute
   '/_app/collections': typeof AppCollectionsRoute
   '/_app/customers': typeof AppCustomersRoute
   '/_app/employees': typeof AppEmployeesRoute
   '/_app/expenses': typeof AppExpensesRoute
   '/_app/income': typeof AppIncomeRoute
+  '/_app/inventory': typeof AppInventoryRoute
   '/_app/invoices': typeof AppInvoicesRoute
   '/_app/jobs': typeof AppJobsRoute
   '/_app/marketplace': typeof AppMarketplaceRoute
@@ -216,9 +258,12 @@ export interface FileRoutesById {
   '/_app/requests': typeof AppRequestsRoute
   '/_app/sacco': typeof AppSaccoRoute
   '/_app/sales': typeof AppSalesRoute
+  '/_app/services': typeof AppServicesRoute
   '/_app/settings': typeof AppSettingsRoute
+  '/_app/specifications': typeof AppSpecificationsRoute
   '/_app/tab': typeof AppTabRoute
   '/_app/users': typeof AppUsersRoute
+  '/_app/variants': typeof AppVariantsRoute
   '/_app/work': typeof AppWorkRoute
   '/_app/': typeof AppIndexRoute
 }
@@ -228,11 +273,13 @@ export interface FileRouteTypes {
     | '/'
     | '/assets'
     | '/businesses'
+    | '/categories'
     | '/collections'
     | '/customers'
     | '/employees'
     | '/expenses'
     | '/income'
+    | '/inventory'
     | '/invoices'
     | '/jobs'
     | '/marketplace'
@@ -243,19 +290,24 @@ export interface FileRouteTypes {
     | '/requests'
     | '/sacco'
     | '/sales'
+    | '/services'
     | '/settings'
+    | '/specifications'
     | '/tab'
     | '/users'
+    | '/variants'
     | '/work'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/assets'
     | '/businesses'
+    | '/categories'
     | '/collections'
     | '/customers'
     | '/employees'
     | '/expenses'
     | '/income'
+    | '/inventory'
     | '/invoices'
     | '/jobs'
     | '/marketplace'
@@ -266,9 +318,12 @@ export interface FileRouteTypes {
     | '/requests'
     | '/sacco'
     | '/sales'
+    | '/services'
     | '/settings'
+    | '/specifications'
     | '/tab'
     | '/users'
+    | '/variants'
     | '/work'
     | '/'
   id:
@@ -276,11 +331,13 @@ export interface FileRouteTypes {
     | '/_app'
     | '/_app/assets'
     | '/_app/businesses'
+    | '/_app/categories'
     | '/_app/collections'
     | '/_app/customers'
     | '/_app/employees'
     | '/_app/expenses'
     | '/_app/income'
+    | '/_app/inventory'
     | '/_app/invoices'
     | '/_app/jobs'
     | '/_app/marketplace'
@@ -291,9 +348,12 @@ export interface FileRouteTypes {
     | '/_app/requests'
     | '/_app/sacco'
     | '/_app/sales'
+    | '/_app/services'
     | '/_app/settings'
+    | '/_app/specifications'
     | '/_app/tab'
     | '/_app/users'
+    | '/_app/variants'
     | '/_app/work'
     | '/_app/'
   fileRoutesById: FileRoutesById
@@ -332,6 +392,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBusinessesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/categories': {
+      id: '/_app/categories'
+      path: '/categories'
+      fullPath: '/categories'
+      preLoaderRoute: typeof AppCategoriesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/collections': {
       id: '/_app/collections'
       path: '/collections'
@@ -365,6 +432,13 @@ declare module '@tanstack/react-router' {
       path: '/income'
       fullPath: '/income'
       preLoaderRoute: typeof AppIncomeRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/inventory': {
+      id: '/_app/inventory'
+      path: '/inventory'
+      fullPath: '/inventory'
+      preLoaderRoute: typeof AppInventoryRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/invoices': {
@@ -437,11 +511,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSalesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/services': {
+      id: '/_app/services'
+      path: '/services'
+      fullPath: '/services'
+      preLoaderRoute: typeof AppServicesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings': {
       id: '/_app/settings'
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/specifications': {
+      id: '/_app/specifications'
+      path: '/specifications'
+      fullPath: '/specifications'
+      preLoaderRoute: typeof AppSpecificationsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/tab': {
@@ -458,6 +546,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppUsersRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/variants': {
+      id: '/_app/variants'
+      path: '/variants'
+      fullPath: '/variants'
+      preLoaderRoute: typeof AppVariantsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/work': {
       id: '/_app/work'
       path: '/work'
@@ -471,11 +566,13 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppAssetsRoute: typeof AppAssetsRoute
   AppBusinessesRoute: typeof AppBusinessesRoute
+  AppCategoriesRoute: typeof AppCategoriesRoute
   AppCollectionsRoute: typeof AppCollectionsRoute
   AppCustomersRoute: typeof AppCustomersRoute
   AppEmployeesRoute: typeof AppEmployeesRoute
   AppExpensesRoute: typeof AppExpensesRoute
   AppIncomeRoute: typeof AppIncomeRoute
+  AppInventoryRoute: typeof AppInventoryRoute
   AppInvoicesRoute: typeof AppInvoicesRoute
   AppJobsRoute: typeof AppJobsRoute
   AppMarketplaceRoute: typeof AppMarketplaceRoute
@@ -486,9 +583,12 @@ interface AppRouteChildren {
   AppRequestsRoute: typeof AppRequestsRoute
   AppSaccoRoute: typeof AppSaccoRoute
   AppSalesRoute: typeof AppSalesRoute
+  AppServicesRoute: typeof AppServicesRoute
   AppSettingsRoute: typeof AppSettingsRoute
+  AppSpecificationsRoute: typeof AppSpecificationsRoute
   AppTabRoute: typeof AppTabRoute
   AppUsersRoute: typeof AppUsersRoute
+  AppVariantsRoute: typeof AppVariantsRoute
   AppWorkRoute: typeof AppWorkRoute
   AppIndexRoute: typeof AppIndexRoute
 }
@@ -496,11 +596,13 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAssetsRoute: AppAssetsRoute,
   AppBusinessesRoute: AppBusinessesRoute,
+  AppCategoriesRoute: AppCategoriesRoute,
   AppCollectionsRoute: AppCollectionsRoute,
   AppCustomersRoute: AppCustomersRoute,
   AppEmployeesRoute: AppEmployeesRoute,
   AppExpensesRoute: AppExpensesRoute,
   AppIncomeRoute: AppIncomeRoute,
+  AppInventoryRoute: AppInventoryRoute,
   AppInvoicesRoute: AppInvoicesRoute,
   AppJobsRoute: AppJobsRoute,
   AppMarketplaceRoute: AppMarketplaceRoute,
@@ -511,9 +613,12 @@ const AppRouteChildren: AppRouteChildren = {
   AppRequestsRoute: AppRequestsRoute,
   AppSaccoRoute: AppSaccoRoute,
   AppSalesRoute: AppSalesRoute,
+  AppServicesRoute: AppServicesRoute,
   AppSettingsRoute: AppSettingsRoute,
+  AppSpecificationsRoute: AppSpecificationsRoute,
   AppTabRoute: AppTabRoute,
   AppUsersRoute: AppUsersRoute,
+  AppVariantsRoute: AppVariantsRoute,
   AppWorkRoute: AppWorkRoute,
   AppIndexRoute: AppIndexRoute,
 }

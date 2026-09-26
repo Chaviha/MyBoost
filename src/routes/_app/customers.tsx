@@ -3,6 +3,7 @@ import { Bell, Minus, Plus, Search, Users, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
+import { MoreActions } from "@/components/more-actions";
 import { Toolbar } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
@@ -142,19 +143,19 @@ function CustomersPage() {
                           This tab is set so only the customer posts new charges.
                         </p>
                       )}
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="secondary" onClick={() => {
+                      <MoreActions actions={[
+                        { label: "Edit", icon: <Pencil className="size-4" />, onSelect: () => {
                           const name = window.prompt("Customer name", customer.name);
                           if (name === null) return;
                           const phone = window.prompt("Phone", customer.phone) ?? customer.phone;
                           const email = window.prompt("Email", customer.email) ?? customer.email;
                           updateCustomer(customer.customer_id, { name: name.trim() || customer.name, phone, email });
                           toast.success("Customer updated.");
-                        }}><Pencil className="size-3.5" /> Edit</Button>
-                        <Button size="sm" variant="secondary" onClick={() => {
+                        } },
+                        { label: "Delete", destructive: true, icon: <Trash2 className="size-4" />, onSelect: () => {
                           if (window.confirm(`Delete ${customer.name}?`)) { deleteCustomer(customer.customer_id); toast.success("Customer deleted."); }
-                        }}><Trash2 className="size-3.5" /> Delete</Button>
-                      </div>
+                        } },
+                      ]} />
                       {canPay(customer) ? (
                         <Button size="sm" variant="secondary" onClick={() => setPayFor(customer)}>
                           <Minus className="size-3.5" />

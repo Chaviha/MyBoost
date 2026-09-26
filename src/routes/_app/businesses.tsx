@@ -3,6 +3,7 @@ import { ChevronRight, ImagePlus, MapPin, Plus, Pencil, Trash2 } from "lucide-re
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
+import { MoreActions } from "@/components/more-actions";
 import { Toolbar } from "@/components/app-shell";
 import { Field } from "@/components/field";
 import { ListingCover } from "@/components/listing-cover";
@@ -100,19 +101,19 @@ function BusinessesPage() {
                 Manage business
                 <ChevronRight className="size-4" />
               </button>
-              <div className="flex gap-2">
-                <Button size="sm" variant="secondary" onClick={() => {
+              <MoreActions actions={[
+                { label: "Edit", icon: <Pencil className="size-4" />, onSelect: () => {
                   const name = window.prompt("Business name", b.business_name);
                   if (name === null) return;
                   const region = window.prompt("Region", b.region) ?? b.region;
                   updateBusiness(b.business_id, { business_name: name.trim() || b.business_name, region });
                   void refreshPublicMarketplace();
                   toast.success("Business updated.");
-                }}><Pencil className="size-3.5" /> Edit</Button>
-                <Button size="sm" variant="secondary" onClick={() => {
+                } },
+                { label: "Delete", destructive: true, icon: <Trash2 className="size-4" />, onSelect: () => {
                   if (window.confirm(`Delete ${b.business_name}? This also removes its business records.`)) { deleteBusiness(b.business_id); toast.success("Business deleted."); }
-                }}><Trash2 className="size-3.5" /> Delete</Button>
-              </div>
+                } },
+              ]} />
               <Button size="sm" variant="ghost" onClick={() => setMediaForId(b.business_id)}>
                 <ImagePlus className="size-3.5" />
                 Photos & videos

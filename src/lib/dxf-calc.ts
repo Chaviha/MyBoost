@@ -173,42 +173,127 @@ function sampleBezierChain(xs: number[], ys: number[], closed: boolean): number 
   return total;
 }
 
-export const DXF_MATERIALS = ["Mild Steel", "Stainless Steel", "Aluminium", "Brass"];
+/** Process / service keywords cutting companies use in product names. */
+export const DXF_PROCESSES = [
+  "Laser Cut",
+  "Plasma Cut",
+  "CNC Cut",
+  "Waterjet Cut",
+  "Router Cut",
+  "DXF Cut",
+  "Engraving",
+  "Punching",
+  "Pierce",
+] as const;
 
-/** Built-in fallback rates (KSh) used only when the pricing business has no matching catalog product. */
-const FALLBACK_RATES: Record<string, { pierce: number; cutRate: number }> = {
-  "mild steel": { pierce: 25, cutRate: 0.0008 },
-  "stainless steel": { pierce: 35, cutRate: 0.001 },
-  aluminium: { pierce: 18, cutRate: 0.0006 },
-  brass: { pierce: 40, cutRate: 0.0009 },
-};
+export type DxfProcess = (typeof DXF_PROCESSES)[number];
 
-export type DxfRate = { pierceCost: number; cutRate: number; source: "catalog" | "fallback"; product?: PriceableItem };
+export const DXF_MATERIALS = [
+  "Mild Steel",
+  "Stainless Steel",
+  "Aluminium",
+  "Brass",
+  "Wood",
+  "MDF",
+  "Plywood",
+  "Acrylic",
+  "Perspex",
+  "PVC",
+] as const;
+
+/** Common thicknesses (mm) offered in the quote dropdown. */
+export const DXF_THICKNESSES_MM = [
+  0.5, 0.8, 1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 15, 16, 20, 25,
+] as const;
 
 /**
- * Find cut-rate (KSh/mm) and pierce-cost (KSh/pierce) for a material+thickness from
- * the pricing business's catalog. Convention: a product named/categorised like
- * "DXF Cut Mild Steel 3mm" supplies the per-mm cut rate, and an optional product
- * named like "DXF Pierce Mild Steel" supplies the per-pierce cost. Falls back to
- * built-in industry-typical rates if nothing matches, so the calculator still works
- * before a business has set up its DXF pricing.
+ * Built-in fallback rates used only when no cutting company has listed a matching
+ * product. cutRate is KSh per mm of cut path; pierce is KSh per pierce/start.
  */
-export function matchDxfRate(products: PriceableItem[], material: string, thickness: number): DxfRate {
-  const matTokens = material.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+const FALLBACK_RATES: Record<string, { pierce: number; cutRate: number }> = {
+  "mild steel": { pierce: 25, cutRate: 0.8 },
+  "stainless steel": { pierce: 35, cutRate: 1.2 },
+  aluminium: { pierce: 18, cutRate: 0.6 },
+  brass: { pierce: 40, cutRate: 0.9 },
+  wood: { pierce: 10, cutRate: 0.25 },
+  mdf: { pierce: 8, cutRate: 0.2 },
+  plywood: { pierce: 10, cutRate: 0.22 },
+  acrylic: { pierce: 15, cutRate: 0.4 },
+  perspex: { pierce: 15, cutRate: 0.4 },
+  pvc: { pierce: 12, cutRate: 0.3 },
+};
+
+export type DxfRate = {
+  pierceCost: number;
+  /** Always normalised to KSh per mm of cut length. */
+  cutRate: number;
+  source: "catalog" | "fallback";
+  product?: PriceableItem;
+  pierceProduct?: PriceableItem;
+  note?: string;
+};
+
+/**
+ * How a cutting company lists prices in Catalogue → Products:
+ *
+ * Product name pattern:  `{Process} {Material} {Thickness}mm`
+ * Examples:
+ *   "Laser Cut Mild Steel 3mm"
+ *   "Engraving Acrylic 5mm"
+ *   "Punching Mild Steel 2mm"
+ *   "CNC Cut Wood 12mm"
+ *
+ * Unit: "m" (KSh per metre of path) preferred, or "mm".
+ * Optional pierce product: "Pierce Mild Steel" (unit: pierce).
+ */
+export function matchDxfRate(
+  products: PriceableItem[],
+  material: string,
+  thickness: number,
+  process?: string,
+): DxfRate {
+  const matTokens = material
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const processTokens = (process || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
   const thicknessToken = thickness ? `${thickness}mm` : null;
+  const thicknessBare = thickness ? String(thickness) : null;
 
   const scoreOf = (p: PriceableItem) => {
     const hay = `${p.category} ${p.name}`.toLowerCase();
     let score = 0;
-    for (const t of matTokens) if (hay.includes(t)) score += 1;
-    if (thicknessToken && hay.includes(thicknessToken)) score += 3;
+    for (const t of matTokens) if (hay.includes(t)) score += 2;
+    for (const t of processTokens) if (hay.includes(t)) score += 3;
+    if (thicknessToken && hay.includes(thicknessToken)) score += 4;
+    else if (thicknessBare && hay.includes(thicknessBare)) score += 2;
+    if (
+      /laser|plasma|cnc|dxf|cut|router|waterjet|engrav|punch|pierce|cutting/i.test(
+        hay,
+      )
+    ) {
+      score += 1;
+    }
     return score;
   };
 
-  const cutCandidates = products.filter((p) => /dxf|cut/i.test(`${p.category} ${p.name}`));
-  const pierceCandidates = products.filter((p) => /pierce/i.test(`${p.category} ${p.name}`));
+  const serviceCandidates = products.filter((p) =>
+    /dxf|cut|laser|plasma|cnc|router|waterjet|cutting|engrav|punch/i.test(
+      `${p.category} ${p.name}`,
+    ),
+  );
+  const pierceCandidates = products.filter((p) =>
+    /pierce|piercing|start fee|lead.?in/i.test(`${p.category} ${p.name}`),
+  );
 
-  const bestCut = cutCandidates
+  // Engraving / punching are rate products themselves (not pierce)
+  const isEngraveOrPunch =
+    process && /engrav|punch/i.test(process);
+
+  const bestService = serviceCandidates
     .map((p) => ({ p, score: scoreOf(p) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)[0];
@@ -217,17 +302,45 @@ export function matchDxfRate(products: PriceableItem[], material: string, thickn
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)[0];
 
-  if (bestCut) {
+  if (bestService) {
+    const unit = (bestService.p.unit || "mm").toLowerCase();
+    let cutRatePerMm = bestService.p.selling_price;
+    let note = "";
+    if (unit === "m" || unit === "metre" || unit === "meter" || unit === "lm") {
+      cutRatePerMm = bestService.p.selling_price / 1000;
+      note = `${bestService.p.selling_price}/m → ${cutRatePerMm}/mm`;
+    } else if (unit === "cm") {
+      cutRatePerMm = bestService.p.selling_price / 10;
+      note = `${bestService.p.selling_price}/cm`;
+    } else {
+      note = `${bestService.p.selling_price}/${unit || "mm"}`;
+    }
     return {
-      cutRate: bestCut.p.selling_price,
-      pierceCost: bestPierce ? bestPierce.p.selling_price : 0,
+      cutRate: cutRatePerMm,
+      pierceCost: isEngraveOrPunch ? 0 : bestPierce ? bestPierce.p.selling_price : 0,
       source: "catalog",
-      product: bestCut.p,
+      product: bestService.p,
+      pierceProduct: isEngraveOrPunch ? undefined : bestPierce?.p,
+      note,
     };
   }
 
-  const fallback = FALLBACK_RATES[material.toLowerCase()] ?? FALLBACK_RATES["mild steel"];
-  return { cutRate: fallback.cutRate, pierceCost: fallback.pierce, source: "fallback" };
+  const key = material.toLowerCase();
+  const fallback =
+    FALLBACK_RATES[key] ??
+    (key.includes("steel")
+      ? FALLBACK_RATES["mild steel"]
+      : key.includes("acryl") || key.includes("perspex")
+        ? FALLBACK_RATES.acrylic
+        : key.includes("wood") || key.includes("mdf") || key.includes("ply")
+          ? FALLBACK_RATES.wood
+          : FALLBACK_RATES["mild steel"]);
+  return {
+    cutRate: fallback.cutRate,
+    pierceCost: isEngraveOrPunch ? 0 : fallback.pierce,
+    source: "fallback",
+    note: "typical rate (no cutting company matched in catalogue)",
+  };
 }
 
 export function dxfLineTotal(cutLenMm: number, pierces: number, rate: DxfRate, qty: number) {

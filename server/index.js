@@ -13,9 +13,11 @@ const { Pool } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadRoot = path.join(__dirname, "..", "uploads", "businesses");
 const assetUploadRoot = path.join(__dirname, "..", "uploads", "assets");
+const productUploadRoot = path.join(__dirname, "..", "uploads", "products");
 const avatarUploadRoot = path.join(__dirname, "..", "uploads", "avatars");
 fs.mkdirSync(uploadRoot, { recursive: true });
 fs.mkdirSync(assetUploadRoot, { recursive: true });
+fs.mkdirSync(productUploadRoot, { recursive: true });
 fs.mkdirSync(avatarUploadRoot, { recursive: true });
 const PORT = Number(process.env.PORT || process.env.API_PORT || 3001);
 const SESSION_DAYS = 30;
@@ -272,6 +274,21 @@ function reqUserIsAdminOrOwner(userId, business, state) {
   return user?.account_level === "admin" || business.owner_user_id === userId;
 }
 
+
+async function productFromState(userId, productId) {
+  const result = await pool.query("SELECT state FROM user_state WHERE user_id = $1", [userId]);
+  const state = result.rows[0]?.state;
+  const product = state?.products?.find((p) => p.product_id === productId);
+  if (!product) return null;
+  const user = state?.users?.find((u) => u.user_id === userId);
+  const isAdmin = user?.account_level === "admin";
+  const ownsBusiness = product.business_id
+    ? state?.businesses?.some((b) => b.business_id === product.business_id && b.owner_user_id === userId)
+    : false;
+  if (isAdmin || ownsBusiness) return { state, product };
+  return null;
+}
+
 async function assetFromState(userId, assetId) {
   const result = await pool.query("SELECT state FROM user_state WHERE user_id = $1", [userId]);
   const state = result.rows[0]?.state;
@@ -423,6 +440,68 @@ app.delete("/api/assets/:assetId/media/:mediaId", auth, async (req, res, next) =
   } catch (error) { next(error); }
 });
 
+
+app.post("/api/products/:productId/media", auth, async (req, res, next) => {
+  try {
+    const productId = String(req.params.productId || "");
+    const access = await productFromState(req.user.id, productId);
+    if (!access) return res.status(403).json({ error: "You do not have permission to manage this product" });
+    const parsed = parseMediaDataUrl(req.body.dataUrl);
+    if (!parsed) return res.status(400).json({ error: "Invalid file. Use JPG, PNG, WEBP or GIF images up to 6MB, or MP4/WEBM/MOV videos up to 40MB." });
+    const mediaId = crypto.randomUUID();
+    const filename = `${mediaId}.${parsed.ext}`;
+    const dir = path.join(productUploadRoot, productId);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, filename), parsed.buffer);
+    const media = {
+      media_id: mediaId,
+      url: `/uploads/products/${encodeURIComponent(productId)}/${filename}`,
+      name: safeFilename(req.body.name || filename),
+      media_type: parsed.media_type,
+      created_at: new Date().toISOString(),
+    };
+    const nextState = {
+      ...access.state,
+      products: access.state.products.map((p) =>
+        p.product_id === productId
+          ? {
+              ...p,
+              gallery: [...(Array.isArray(p.gallery) ? p.gallery : []), media],
+              image_url: p.image_url || (media.media_type === "image" ? media.url : p.image_url),
+            }
+          : p,
+      ),
+    };
+    await pool.query(`INSERT INTO user_state (user_id, state) VALUES ($1,$2) ON CONFLICT (user_id) DO UPDATE SET state=EXCLUDED.state, updated_at=NOW()`, [req.user.id, JSON.stringify(nextState)]);
+    res.status(201).json({ media });
+  } catch (error) { next(error); }
+});
+
+app.delete("/api/products/:productId/media/:mediaId", auth, async (req, res, next) => {
+  try {
+    const productId = String(req.params.productId || "");
+    const mediaId = String(req.params.mediaId || "");
+    const access = await productFromState(req.user.id, productId);
+    if (!access) return res.status(403).json({ error: "You do not have permission to manage this product" });
+    const product = access.product;
+    const gallery = Array.isArray(product.gallery) ? product.gallery : [];
+    const media = gallery.find((item) => item.media_id === mediaId);
+    if (!media) return res.status(404).json({ error: "File not found" });
+    const filePath = path.join(productUploadRoot, productId, path.basename(new URL(`http://localhost${media.url}`).pathname));
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const remaining = gallery.filter((item) => item.media_id !== mediaId);
+    const image_url = remaining.find((item) => item.media_type === "image")?.url || "";
+    const nextState = {
+      ...access.state,
+      products: access.state.products.map((p) =>
+        p.product_id === productId ? { ...p, gallery: remaining, image_url } : p,
+      ),
+    };
+    await pool.query(`UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2`, [JSON.stringify(nextState), req.user.id]);
+    res.json({ ok: true, image_url });
+  } catch (error) { next(error); }
+});
+
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
 // Public marketplace: only records explicitly marked `listed: true` are exposed.
@@ -492,13 +571,11 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
       }
 
       // Products power cross-business quotation pricing (steel, DXF cut, materials —
-      // any sector). A product can be listed for quotation use even if its business
-      // has not opted into the public directory, so we resolve names off every
-      // business the account owns, not just `listedBusinesses`.
+      // any sector). Every active product is available for quotations by default —
+      // no separate "list for quotations" flag. Business directory listing is separate.
       const businessNameById = new Map(allBusinesses.map((b) => [b.business_id, b.business_name]));
       for (const product of Array.isArray(state.products) ? state.products : []) {
         if (
-          product?.listed &&
           product.status !== "inactive" &&
           !demoBusinessIds.has(product.business_id) &&
           !demoProductIds.has(product.product_id)
@@ -511,6 +588,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
             category: product.category || "",
             unit: product.unit || "unit",
             selling_price: Number(product.selling_price || 0),
+            specs: product.specs && typeof product.specs === "object" ? product.specs : {},
           });
         }
       }

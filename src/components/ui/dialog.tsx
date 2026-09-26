@@ -32,15 +32,17 @@ export function DialogContent({
       <DialogOverlay />
       <DialogPrimitive.Content
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 w-[min(calc(100%-2rem),28rem)] -translate-x-1/2 -translate-y-1/2",
-          "rounded-xl bg-paper p-6 text-ink shadow-border",
+          "fixed top-1/2 left-1/2 z-50 flex w-[min(calc(100%-2rem),28rem)] max-h-[min(90dvh,40rem)] -translate-x-1/2 -translate-y-1/2 flex-col",
+          "rounded-xl bg-paper text-ink shadow-border",
           className,
         )}
         {...props}
       >
-        {children}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6 pt-6 pb-4">
+          {children}
+        </div>
         <DialogPrimitive.Close
-          className="absolute top-3 right-3 flex size-11 items-center justify-center rounded-md text-ink-muted hover:bg-leaf hover:text-ink"
+          className="absolute top-3 right-3 z-10 flex size-11 items-center justify-center rounded-md text-ink-muted hover:bg-leaf hover:text-ink"
           aria-label="Close"
         >
           <X className="size-4" />

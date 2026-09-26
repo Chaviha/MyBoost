@@ -169,20 +169,86 @@ export type MoneyRequest = {
   pictures: InvoicePicture[];
 };
 
+/** Business-owned catalogue category, e.g. "CHS Steel Pipe" or "Cement". */
+export type ProductCategory = {
+  category_id: string;
+  business_id: string;
+  name: string;
+  description: string;
+  /** Default sell unit for products in this category (m, kg, pcs, …). */
+  unit_default: string;
+};
+
+export type SpecDataType = "number" | "text";
+
+/**
+ * A structured attribute defined once per category.
+ * Example for CHS steel: nominal_bore (mm), outside_dia (mm), mass_kg_m (kg/m), pressure_mpa (MPa).
+ */
+export type SpecDefinition = {
+  spec_id: string;
+  category_id: string;
+  business_id: string;
+  /** Stable machine key, e.g. "nominal_bore". */
+  key: string;
+  /** Human label, e.g. "Nominal bore". */
+  label: string;
+  /** Unit shown next to values, e.g. "mm", "kg/m", "MPa". */
+  unit: string;
+  data_type: SpecDataType;
+  sort_order: number;
+};
+
+/** Keyed spec values on a product or variant, e.g. { nominal_bore: 50, outside_dia: 60.3 }. */
+export type SpecValues = Record<string, string | number>;
+
+/** Physical/catalogue goods vs billable services (labour, cutting, consulting…). */
+export type CatalogueItemKind = "product" | "service";
+
 export type Product = {
   product_id: string;
   business_id: string;
   name: string;
+  /** product = stocked goods; service = offered work/rates (no inventory emphasis). */
+  item_kind?: CatalogueItemKind;
+  /** Free-text category label kept for compatibility and display. */
   category: string;
+  /** Links to ProductCategory when using structured catalogue. */
+  category_id?: string;
   unit: string;
   selling_price: number;
   cost_price: number;
   stock: number;
   status: string;
+  sku?: string;
+  description?: string;
+  /** Structured measurements / attributes for this SKU. */
+  specs?: SpecValues;
+  /** Cover / primary design or service image. */
+  image_url?: string;
+  /** Design drawings, photos, and short videos. */
+  gallery?: MediaItem[];
   /** when true, this product is offered up across LifeBoost for anyone building a
    * quotation — any sector, not just this product's own business — via the public
    * marketplace endpoint. */
   listed?: boolean;
+};
+
+/**
+ * Size / grade / colour row under a parent product.
+ * Example: CHS 50 NB under parent "Mild steel CHS pipe".
+ */
+export type ProductVariant = {
+  variant_id: string;
+  product_id: string;
+  business_id: string;
+  name: string;
+  sku: string;
+  selling_price: number;
+  cost_price: number;
+  stock: number;
+  specs: SpecValues;
+  status: string;
 };
 
 /** A listed product as returned by the cross-account /api/public/marketplace feed.
@@ -196,6 +262,7 @@ export type MarketplaceProduct = {
   category: string;
   unit: string;
   selling_price: number;
+  specs?: Record<string, string | number>;
 };
 
 export type Job = {
@@ -230,7 +297,7 @@ export type QuoteLineItem = {
    * taking the catalog match as-is */
   customized?: boolean;
   /** free-form spec details (grade, dims, material, thickness, cut length, etc.) for display */
-  meta?: Record<string, string | number>;
+  meta?: Record<string, string | number | boolean | null | Record<string, number>>;
 };
 
 export type Quotation = {
@@ -306,6 +373,12 @@ export type LifeState = {
   expenses: Expense[];
   requests: MoneyRequest[];
   products: Product[];
+  /** Structured catalogue categories per business. */
+  product_categories: ProductCategory[];
+  /** Spec field definitions belonging to categories. */
+  product_specs: SpecDefinition[];
+  /** Optional size/grade rows under products. */
+  product_variants: ProductVariant[];
   jobs: Job[];
   quotations: Quotation[];
   invoices: Invoice[];

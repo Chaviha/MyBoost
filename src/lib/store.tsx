@@ -15,6 +15,7 @@ import {
   workspaceKind,
   type Permission,
 } from "./roles";
+import { getCatalogueTemplate } from "./catalogue-templates";
 import { buildSeed } from "./seed";
 
 const LifeContext = createContext<any>(null);
@@ -41,11 +42,15 @@ import type {
   MoneyRequest,
   Offer,
   Product,
+  ProductCategory,
+  ProductVariant,
   Quotation,
   Relationship,
   RequestStatus,
   Sacco,
   Sale,
+  SpecDefinition,
+  SpecValues,
   User,
 } from "./types";
 
@@ -156,6 +161,31 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     next.liabilities = Object.fromEntries(Object.entries(next.liabilities || {}).filter(([id]) => !["USR000", "USR001", "USR002", "USR003", "USR004"].includes(id)));
     next.currentUserId = next.users.some((u) => u.user_id === next.currentUserId) ? next.currentUserId : "";
     next.selectedBusinessId = next.businesses.some((b) => b.business_id === next.selectedBusinessId) ? next.selectedBusinessId : "";
+    return normalizeCatalogue(next);
+  };
+
+  /** Ensure catalogue tables exist and products have specs maps (safe for older saved state). */
+  const normalizeCatalogue = (input: LifeState): LifeState => {
+    const next = input;
+    next.product_categories = Array.isArray(next.product_categories) ? next.product_categories : [];
+    next.product_specs = Array.isArray(next.product_specs) ? next.product_specs : [];
+    next.product_variants = Array.isArray(next.product_variants) ? next.product_variants : [];
+    next.products = (next.products || []).map((p) => ({
+      ...p,
+      item_kind: p.item_kind === "service" ? "service" : "product",
+      specs: p.specs && typeof p.specs === "object" ? p.specs : {},
+      sku: p.sku || "",
+      description: p.description || "",
+      category_id: p.category_id || "",
+      image_url: p.image_url || "",
+      gallery: Array.isArray(p.gallery) ? p.gallery : [],
+      listed: true, // always available for quotations
+    }));
+    next.product_variants = next.product_variants.map((v) => ({
+      ...v,
+      specs: v.specs && typeof v.specs === "object" ? v.specs : {},
+      sku: v.sku || "",
+    }));
     return next;
   };
 
@@ -178,7 +208,9 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       const { user } = (await me.json()) as { user: User };
       const response = await fetch("/api/state", { credentials: "include" });
       const payload = response.ok ? ((await response.json()) as { state: LifeState | null }) : { state: null };
-      const next = payload.state ? removeLegacyDemoData(payload.state) : prepareStateForUser(buildSeed(), user);
+      const next = normalizeCatalogue(
+        payload.state ? removeLegacyDemoData(payload.state) : prepareStateForUser(buildSeed(), user),
+      );
       next.currentUserId = user.user_id;
       next.businesses = (next.businesses || []).map((b) => ({ ...b, gallery: Array.isArray(b.gallery) ? b.gallery : [] }));
       next.assets = (next.assets || []).map((a) => ({ ...a, gallery: Array.isArray(a.gallery) ? a.gallery : [] }));
@@ -269,6 +301,11 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     const businessEmployees = state.employees.filter((e) => e.business_id === bid);
     const businessSales = state.sales.filter((s) => s.business_id === bid);
     const businessProducts = state.products.filter((p) => p.business_id === bid);
+    const businessGoods = businessProducts.filter((p) => (p.item_kind || "product") !== "service");
+    const businessServices = businessProducts.filter((p) => p.item_kind === "service");
+    const businessCategories = (state.product_categories || []).filter((c) => c.business_id === bid);
+    const businessSpecDefs = (state.product_specs || []).filter((s) => s.business_id === bid);
+    const businessVariants = (state.product_variants || []).filter((v) => v.business_id === bid);
     const businessExpenses = state.expenses.filter((e) => e.business_id === bid);
     const businessJobs = state.jobs.filter((j) =>
       allow("manage_jobs") ? (allow("manage_all_businesses") ? true : j.business_id === bid) : false,
@@ -362,6 +399,11 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       businessSales,
       businessRequests,
       businessProducts,
+      businessGoods,
+      businessServices,
+      businessCategories,
+      businessSpecDefs,
+      businessVariants,
       businessExpenses,
       businessJobs,
       myJobs,
@@ -436,6 +478,9 @@ export function LifeProvider({ children }: { children: ReactNode }) {
             expenses: prev.expenses.filter((x) => x.business_id !== businessId),
             requests: prev.requests.filter((x) => x.business_id !== businessId),
             products: prev.products.filter((x) => x.business_id !== businessId),
+            product_categories: (prev.product_categories || []).filter((x) => x.business_id !== businessId),
+            product_specs: (prev.product_specs || []).filter((x) => x.business_id !== businessId),
+            product_variants: (prev.product_variants || []).filter((x) => x.business_id !== businessId),
             jobs: prev.jobs.filter((x) => x.business_id !== businessId),
             quotations: prev.quotations.filter((x) => x.business_id !== businessId),
             invoices: prev.invoices.filter((x) => x.business_id !== businessId),
@@ -465,7 +510,11 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         setState((prev) => ({ ...prev, products: prev.products.map((p) => p.product_id === productId ? { ...p, ...patch } : p) }));
       },
       deleteProduct: (productId) => {
-        setState((prev) => ({ ...prev, products: prev.products.filter((p) => p.product_id !== productId) }));
+        setState((prev) => ({
+          ...prev,
+          products: prev.products.filter((p) => p.product_id !== productId),
+          product_variants: (prev.product_variants || []).filter((v) => v.product_id !== productId),
+        }));
       },
       addBusiness: async (form) => {
         const business_id = uid("BUS");
@@ -916,7 +965,95 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         if (!response.ok) throw new Error("Unable to save asset");
         return asset_id;
       },
-      addProduct: (form) => {
+      updateAsset: (assetId: string, patch: Partial<{
+        name: string;
+        type: string;
+        value: number;
+        business_id: string;
+        listed: boolean;
+        listing_type: "For sale" | "For hire";
+        location: string;
+        phone: string;
+        notes: string;
+        status: string;
+      }>) => {
+        setState((prev) => {
+          const canEdit = (a: { user_id: string; business_id: string }) =>
+            a.user_id === prev.currentUserId ||
+            prev.businesses.some(
+              (b) => b.business_id === a.business_id && b.owner_user_id === prev.currentUserId,
+            );
+          return {
+            ...prev,
+            assets: prev.assets.map((a) =>
+              a.asset_id === assetId && canEdit(a) ? { ...a, ...patch } : a,
+            ),
+          };
+        });
+      },
+      deleteAsset: (assetId: string) => {
+        setState((prev) => {
+          const canEdit = (a: { user_id: string; business_id: string }) =>
+            a.user_id === prev.currentUserId ||
+            prev.businesses.some(
+              (b) => b.business_id === a.business_id && b.owner_user_id === prev.currentUserId,
+            );
+          return {
+            ...prev,
+            assets: prev.assets.filter((a) => !(a.asset_id === assetId && canEdit(a))),
+          };
+        });
+      },
+      bulkUpdateAssets: (
+        assetIds: string[],
+        patch: Partial<{
+          listed: boolean;
+          listing_type: "For sale" | "For hire";
+          status: string;
+        }>,
+      ) => {
+        const idSet = new Set(assetIds);
+        setState((prev) => {
+          const canEdit = (a: { user_id: string; business_id: string }) =>
+            a.user_id === prev.currentUserId ||
+            prev.businesses.some(
+              (b) => b.business_id === a.business_id && b.owner_user_id === prev.currentUserId,
+            );
+          return {
+            ...prev,
+            assets: prev.assets.map((a) =>
+              idSet.has(a.asset_id) && canEdit(a) ? { ...a, ...patch } : a,
+            ),
+          };
+        });
+      },
+      bulkDeleteAssets: (assetIds: string[]) => {
+        const idSet = new Set(assetIds);
+        setState((prev) => {
+          const canEdit = (a: { user_id: string; business_id: string }) =>
+            a.user_id === prev.currentUserId ||
+            prev.businesses.some(
+              (b) => b.business_id === a.business_id && b.owner_user_id === prev.currentUserId,
+            );
+          return {
+            ...prev,
+            assets: prev.assets.filter((a) => !(idSet.has(a.asset_id) && canEdit(a))),
+          };
+        });
+      },
+      addProduct: (form: {
+        name: string;
+        category: string;
+        categoryId?: string;
+        unit: string;
+        sellingPrice: string;
+        costPrice: string;
+        stock: string;
+        sku?: string;
+        description?: string;
+        specs?: SpecValues;
+        itemKind?: "product" | "service";
+      }) => {
         setState((prev) => ({
           ...prev,
           products: [
@@ -925,15 +1062,379 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               product_id: uid("PRD"),
               business_id: prev.selectedBusinessId,
               name: form.name,
+              item_kind: form.itemKind === "service" ? "service" : "product",
               category: form.category,
-              unit: form.unit || "unit",
+              category_id: form.categoryId || "",
+              unit: form.unit || (form.itemKind === "service" ? "job" : "unit"),
+              selling_price: Number(form.sellingPrice || 0),
+              cost_price: Number(form.costPrice || 0),
+              stock: form.itemKind === "service" ? 0 : Number(form.stock || 0),
+              status: "active",
+              listed: true, // always available for quotations
+              sku: form.sku || "",
+              description: form.description || "",
+              specs: form.specs || {},
+              image_url: "",
+              gallery: [],
+            },
+          ],
+        }));
+      },
+      /** Bulk-add products from CSV/Excel import (same business). */
+      importProducts: (
+        rows: {
+          name: string;
+          category?: string;
+          categoryId?: string;
+          unit?: string;
+          sellingPrice?: string | number;
+          costPrice?: string | number;
+          stock?: string | number;
+          sku?: string;
+          description?: string;
+          specs?: Record<string, string | number>;
+          itemKind?: "product" | "service";
+        }[],
+        defaultKind: "product" | "service" = "product",
+      ) => {
+        if (!rows.length) return 0;
+        let added = 0;
+        setState((prev) => {
+          const bid = prev.selectedBusinessId;
+          if (!bid) return prev;
+          const next = rows
+            .map((form) => {
+              const kind =
+                form.itemKind === "service" || form.itemKind === "product"
+                  ? form.itemKind
+                  : defaultKind;
+              const name = String(form.name || "").trim();
+              if (!name) return null;
+              added += 1;
+              return {
+                product_id: uid("PRD"),
+                business_id: bid,
+                name,
+                item_kind: kind,
+                category: form.category || "",
+                category_id: form.categoryId || "",
+                unit: form.unit || (kind === "service" ? "job" : "unit"),
+                selling_price: Number(form.sellingPrice || 0),
+                cost_price: Number(form.costPrice || 0),
+                stock: kind === "service" ? 0 : Number(form.stock || 0),
+                status: "active" as const,
+                listed: true,
+                sku: form.sku || "",
+                description: form.description || "",
+                specs: form.specs || {},
+                image_url: "",
+                gallery: [],
+              };
+            })
+            .filter(Boolean) as typeof prev.products;
+          return {
+            ...prev,
+            products: [...prev.products, ...next],
+          };
+        });
+        return added || rows.length;
+      },
+      uploadProductMedia: async (productId: string, files: { name: string; media_type: string; dataUrl: string }[]) => {
+        for (const file of files) {
+          const response = await fetch(`/api/products/${encodeURIComponent(productId)}/media`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ name: file.name, dataUrl: file.dataUrl }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "Unable to upload product media");
+          setState((prev) => ({
+            ...prev,
+            products: prev.products.map((p) => {
+              if (p.product_id !== productId) return p;
+              const media = payload.media;
+              const gallery = Array.isArray(p.gallery) ? p.gallery : [];
+              return {
+                ...p,
+                image_url: p.image_url || (media.media_type === "image" ? media.url : p.image_url),
+                gallery: [...gallery, media],
+              };
+            }),
+          }));
+        }
+      },
+      removeProductMedia: async (productId: string, mediaId: string) => {
+        const response = await fetch(
+          `/api/products/${encodeURIComponent(productId)}/media/${encodeURIComponent(mediaId)}`,
+          { method: "DELETE", credentials: "include" },
+        );
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Unable to remove product media");
+        setState((prev) => ({
+          ...prev,
+          products: prev.products.map((p) =>
+            p.product_id === productId
+              ? {
+                  ...p,
+                  image_url: payload.image_url ?? p.image_url,
+                  gallery: (p.gallery || []).filter((m) => m.media_id !== mediaId),
+                }
+              : p,
+          ),
+        }));
+      },
+      reorderProductMedia: async (productId: string, order: string[]) => {
+        setState((prev) => ({
+          ...prev,
+          products: prev.products.map((p) => {
+            if (p.product_id !== productId) return p;
+            const gallery = Array.isArray(p.gallery) ? p.gallery : [];
+            const byId = new Map(gallery.map((m) => [m.media_id, m]));
+            const nextGallery = order.map((id) => byId.get(id)).filter(Boolean) as typeof gallery;
+            for (const m of gallery) {
+              if (!order.includes(m.media_id)) nextGallery.push(m);
+            }
+            const cover = nextGallery.find((m) => m.media_type === "image");
+            return { ...p, gallery: nextGallery, image_url: cover?.url || "" };
+          }),
+        }));
+      },
+      addProductCategory: (form: { name: string; description?: string; unitDefault?: string }) => {
+        const category_id = uid("CAT");
+        setState((prev) => ({
+          ...prev,
+          product_categories: [
+            ...(prev.product_categories || []),
+            {
+              category_id,
+              business_id: prev.selectedBusinessId,
+              name: form.name.trim(),
+              description: form.description || "",
+              unit_default: form.unitDefault || "unit",
+            },
+          ],
+        }));
+        return category_id;
+      },
+      updateProductCategory: (categoryId: string, patch: Partial<ProductCategory>) => {
+        setState((prev) => ({
+          ...prev,
+          product_categories: (prev.product_categories || []).map((c) =>
+            c.category_id === categoryId && c.business_id === prev.selectedBusinessId
+              ? { ...c, ...patch }
+              : c,
+          ),
+        }));
+      },
+      deleteProductCategory: (categoryId: string) => {
+        setState((prev) => ({
+          ...prev,
+          product_categories: (prev.product_categories || []).filter(
+            (c) => !(c.category_id === categoryId && c.business_id === prev.selectedBusinessId),
+          ),
+          product_specs: (prev.product_specs || []).filter((s) => s.category_id !== categoryId),
+          products: prev.products.map((p) =>
+            p.category_id === categoryId ? { ...p, category_id: "" } : p,
+          ),
+        }));
+      },
+      addSpecDefinition: (form: {
+        categoryId: string;
+        key: string;
+        label: string;
+        unit: string;
+        dataType?: "number" | "text";
+      }) => {
+        const key =
+          form.key.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") ||
+          form.label
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "_")
+            .replace(/^_|_$/g, "");
+        setState((prev) => {
+          const existing = (prev.product_specs || []).filter((s) => s.category_id === form.categoryId);
+          return {
+            ...prev,
+            product_specs: [
+              ...(prev.product_specs || []),
+              {
+                spec_id: uid("SPC"),
+                category_id: form.categoryId,
+                business_id: prev.selectedBusinessId,
+                key,
+                label: form.label.trim(),
+                unit: form.unit.trim(),
+                data_type: form.dataType || "number",
+                sort_order: existing.length,
+              },
+            ],
+          };
+        });
+      },
+      updateSpecDefinition: (specId: string, patch: Partial<SpecDefinition>) => {
+        setState((prev) => ({
+          ...prev,
+          product_specs: (prev.product_specs || []).map((s) =>
+            s.spec_id === specId && s.business_id === prev.selectedBusinessId ? { ...s, ...patch } : s,
+          ),
+        }));
+      },
+      deleteSpecDefinition: (specId: string) => {
+        setState((prev) => ({
+          ...prev,
+          product_specs: (prev.product_specs || []).filter((s) => s.spec_id !== specId),
+        }));
+      },
+      /** Move a specification column left/right in the catalogue table (changes sort_order). */
+      reorderSpecDefinition: (specId: string, direction: -1 | 1) => {
+        setState((prev) => {
+          const all = [...(prev.product_specs || [])];
+          const target = all.find((s) => s.spec_id === specId);
+          if (!target || target.business_id !== prev.selectedBusinessId) return prev;
+          const group = all
+            .filter((s) => s.category_id === target.category_id)
+            .sort((a, b) => a.sort_order - b.sort_order);
+          const index = group.findIndex((s) => s.spec_id === specId);
+          const swapWith = index + direction;
+          if (index < 0 || swapWith < 0 || swapWith >= group.length) return prev;
+          const a = group[index];
+          const b = group[swapWith];
+          const orderA = a.sort_order;
+          const orderB = b.sort_order;
+          return {
+            ...prev,
+            product_specs: all.map((s) => {
+              if (s.spec_id === a.spec_id) return { ...s, sort_order: orderB };
+              if (s.spec_id === b.spec_id) return { ...s, sort_order: orderA };
+              return s;
+            }),
+          };
+        });
+      },
+      /** Set absolute column positions for a category (array of spec_ids in display order). */
+      setSpecColumnOrder: (categoryId: string, orderedSpecIds: string[]) => {
+        setState((prev) => {
+          const idSet = new Set(orderedSpecIds);
+          return {
+            ...prev,
+            product_specs: (prev.product_specs || []).map((s) => {
+              if (s.category_id !== categoryId || s.business_id !== prev.selectedBusinessId) return s;
+              const idx = orderedSpecIds.indexOf(s.spec_id);
+              if (idx < 0) return s;
+              return { ...s, sort_order: idx };
+            }).map((s, _i, arr) => {
+              // keep non-listed specs after ordered ones
+              if (s.category_id !== categoryId || idSet.has(s.spec_id)) return s;
+              return s;
+            }),
+          };
+        });
+      },
+      /**
+       * Apply an industry table style to a category (columns differ by trade).
+       * e.g. steel_chs → NB, OD, wall, kg/m, MPa; restaurant → portion, allergens, …
+       */
+      applyCatalogueTemplate: (categoryId: string, templateId: string) => {
+        setState((prev) => {
+          const template = getCatalogueTemplate(templateId);
+          if (!template || template.fields.length === 0) return prev;
+          const existingKeys = new Set(
+            (prev.product_specs || [])
+              .filter((s) => s.category_id === categoryId)
+              .map((s) => s.key),
+          );
+          const startOrder = (prev.product_specs || []).filter((s) => s.category_id === categoryId).length;
+          const defs: SpecDefinition[] = template.fields
+            .filter((f) => !existingKeys.has(f.key))
+            .map((d, i) => ({
+              spec_id: uid("SPC"),
+              category_id: categoryId,
+              business_id: prev.selectedBusinessId,
+              key: d.key,
+              label: d.label,
+              unit: d.unit,
+              data_type: d.data_type,
+              sort_order: startOrder + i,
+            }));
+          if (defs.length === 0) return prev;
+          return {
+            ...prev,
+            product_specs: [...(prev.product_specs || []), ...defs],
+            product_categories: (prev.product_categories || []).map((c) =>
+              c.category_id === categoryId
+                ? { ...c, unit_default: c.unit_default || template.unit_default }
+                : c,
+            ),
+          };
+        });
+      },
+      /** @deprecated prefer applyCatalogueTemplate(id, 'steel_chs') */
+      applySteelChsTemplate: (categoryId: string) => {
+        setState((prev) => {
+          const template = getCatalogueTemplate("steel_chs");
+          if (!template) return prev;
+          const already = (prev.product_specs || []).some((s) => s.category_id === categoryId);
+          if (already) return prev;
+          const defs: SpecDefinition[] = template.fields.map((d, i) => ({
+            spec_id: uid("SPC"),
+            category_id: categoryId,
+            business_id: prev.selectedBusinessId,
+            key: d.key,
+            label: d.label,
+            unit: d.unit,
+            data_type: d.data_type,
+            sort_order: i,
+          }));
+          return {
+            ...prev,
+            product_specs: [...(prev.product_specs || []), ...defs],
+          };
+        });
+      },
+      addProductVariant: (form: {
+        productId: string;
+        name: string;
+        sku?: string;
+        sellingPrice: string;
+        costPrice?: string;
+        stock?: string;
+        specs?: SpecValues;
+      }) => {
+        setState((prev) => ({
+          ...prev,
+          product_variants: [
+            ...(prev.product_variants || []),
+            {
+              variant_id: uid("VAR"),
+              product_id: form.productId,
+              business_id: prev.selectedBusinessId,
+              name: form.name.trim(),
+              sku: form.sku || "",
               selling_price: Number(form.sellingPrice || 0),
               cost_price: Number(form.costPrice || 0),
               stock: Number(form.stock || 0),
+              specs: form.specs || {},
               status: "active",
-              listed: Boolean(form.listed),
             },
           ],
+        }));
+      },
+      updateProductVariant: (variantId: string, patch: Partial<ProductVariant>) => {
+        setState((prev) => ({
+          ...prev,
+          product_variants: (prev.product_variants || []).map((v) =>
+            v.variant_id === variantId && v.business_id === prev.selectedBusinessId
+              ? { ...v, ...patch }
+              : v,
+          ),
+        }));
+      },
+      deleteProductVariant: (variantId: string) => {
+        setState((prev) => ({
+          ...prev,
+          product_variants: (prev.product_variants || []).filter((v) => v.variant_id !== variantId),
         }));
       },
       addExpense: (form) => {

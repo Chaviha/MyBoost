@@ -3,6 +3,7 @@ import { BriefcaseBusiness, Search, Store, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
+import { MoreActions } from "@/components/more-actions";
 import { Toolbar } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
@@ -78,8 +79,8 @@ function EmployeesPage() {
               {employee.salary ? (
                 <span className="text-sm tabular-nums">{money(employee.salary)}</span>
               ) : null}
-              <div className="flex gap-2">
-                <Button size="sm" variant="secondary" onClick={() => {
+              <MoreActions actions={[
+                { label: "Edit", icon: <Pencil className="size-4" />, onSelect: () => {
                   const name = window.prompt("Professional name", employee.name);
                   if (name === null) return;
                   const role = window.prompt("Role", employee.role) ?? employee.role;
@@ -87,11 +88,11 @@ function EmployeesPage() {
                   updateEmployee(employee.employee_id, { name: name.trim() || employee.name, role, phone });
                   void refreshPublicMarketplace();
                   toast.success("Professional updated.");
-                }}><Pencil className="size-3.5" /> Edit</Button>
-                <Button size="sm" variant="secondary" onClick={() => {
+                } },
+                { label: "Delete", destructive: true, icon: <Trash2 className="size-4" />, onSelect: () => {
                   if (window.confirm(`Delete ${employee.name}?`)) { deleteEmployee(employee.employee_id); toast.success("Professional deleted."); }
-                }}><Trash2 className="size-3.5" /> Delete</Button>
-              </div>
+                } },
+              ]} />
               {employee.listed ? (
                 <Badge tone="forest">
                   <Store className="size-3" />

@@ -3,6 +3,7 @@ import { CreditCard, Search, Wallet, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
+import { MoreActions } from "@/components/more-actions";
 import { Toolbar } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
@@ -86,19 +87,19 @@ function SalesPage() {
               <Badge tone={sale.status.toLowerCase() === "completed" ? "forest" : "amber"}>
                 {sale.status}
               </Badge>
-              <div className="flex gap-1">
-                <Button size="sm" variant="ghost" onClick={() => {
+              <MoreActions actions={[
+                { label: "Edit", icon: <Pencil className="size-4" />, onSelect: () => {
                   const customer_name = window.prompt("Customer", sale.customer_name || "Walk-in");
                   if (customer_name === null) return;
                   const totalText = window.prompt("Total", String(sale.total));
                   if (totalText === null) return;
                   updateSale(sale.sale_id, { customer_name, total: Number(totalText) || 0, subtotal: Number(totalText) || 0 });
                   toast.success("Sale updated.");
-                }}><Pencil className="size-3.5" /></Button>
-                <Button size="sm" variant="ghost" onClick={() => {
+                } },
+                { label: "Delete", destructive: true, icon: <Trash2 className="size-4" />, onSelect: () => {
                   if (window.confirm(`Delete sale ${sale.sale_id}?`)) { deleteSale(sale.sale_id); toast.success("Sale deleted."); }
-                }}><Trash2 className="size-3.5" /></Button>
-              </div>
+                } },
+              ]} />
             </div>
           ))
         )}
