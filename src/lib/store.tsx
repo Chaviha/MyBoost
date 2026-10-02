@@ -1485,63 +1485,247 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           const pricingBusiness = form.pricingBusinessId
             ? prev.businesses.find((b) => b.business_id === form.pricingBusinessId)
             : undefined;
-          const lineItemsTotal = (form.lineItems || []).reduce((s, li) => s + Number(li.amount || 0), 0);
+          const lineItemsTotal = (form.lineItems || []).reduce(
+            (s, li) => s + Number(li.amount || 0),
+            0,
+          );
+          const total = form.lineItems?.length ? lineItemsTotal : Number(form.total || 0);
+          const quoteId = uid("QTE");
+          const quoteDate = new Date().toISOString();
+
+          // Review & Accept: quote is only "Sent" until explicitly accepted.
+          // No customer charge / balance change until acceptQuotation.
           return {
             ...prev,
             quotations: [
               {
-                quote_id: uid("QTE"),
+                quote_id: quoteId,
                 business_id: prev.selectedBusinessId,
                 customer_id: form.customerId,
                 customer_name: customer?.name ?? "Customer",
-                total: form.lineItems?.length ? lineItemsTotal : Number(form.total || 0),
+                total,
                 status: "Sent",
-                date: new Date().toISOString(),
+                date: quoteDate,
                 notes: form.notes,
                 quote_type: form.quoteType || "general",
                 pricing_business_id: form.pricingBusinessId,
                 pricing_business_name: pricingBusiness?.business_name,
                 line_items: form.lineItems,
+                share_token: uid("QTK").replace(/[^a-zA-Z0-9]/g, "").slice(0, 16) || uid("QTK"),
               },
               ...prev.quotations,
             ],
           };
         });
       },
-      addInvoice: (form) => {
+      /** Accept a sent quotation → post charge to customer tab + ledger. */
+      acceptQuotation: (quoteId: string) => {
         setState((prev) => {
-          const customer = prev.customers.find((c) => c.customer_id === form.customerId);
+          const quote = prev.quotations.find((q) => q.quote_id === quoteId);
+          if (!quote) return prev;
+          if (quote.status === "Accepted") return prev;
+          if (quote.status === "Rejected") return prev;
+
+          const customer = prev.customers.find((c) => c.customer_id === quote.customer_id);
+          const total = Number(quote.total || 0);
+          const alreadyCharged = prev.ledger.some(
+            (e) =>
+              e.type === "charge" &&
+              e.reference_type === "quotation" &&
+              e.reference_id === quoteId,
+          );
+
+          let customers = prev.customers;
+          let ledger = prev.ledger;
+
+          if (customer && total > 0 && !alreadyCharged) {
+            const nextAmount = Number(customer.amount || 0) + total;
+            customers = customers.map((c) =>
+              c.customer_id === customer.customer_id
+                ? { ...c, amount: nextAmount, status: dueStatus(c.due_date, nextAmount) }
+                : c,
+            );
+            ledger = [
+              {
+                entry_id: uid("LED"),
+                business_id: customer.business_id,
+                customer_id: customer.customer_id,
+                type: "charge" as const,
+                amount: total,
+                description: `Quotation ${quoteId}${quote.notes ? ` — ${quote.notes}` : ""}`,
+                product_id: "",
+                qty: 1,
+                posted_by: prev.currentUserId,
+                date: new Date().toISOString(),
+                reference_id: quoteId,
+                reference_type: "quotation" as const,
+              },
+              ...ledger,
+            ];
+          }
+
           return {
             ...prev,
-            invoices: [
-              {
-                invoice_id: uid("INV"),
-                business_id: prev.selectedBusinessId,
-                customer_id: form.customerId,
-                customer_name: customer?.name ?? "Customer",
-                invoice_date: new Date().toISOString(),
-                due_date: form.due,
-                total: Number(form.total || 0),
-                paid: 0,
-                status: "Unpaid",
-              },
-              ...prev.invoices,
-            ],
+            quotations: prev.quotations.map((q) =>
+              q.quote_id === quoteId ? { ...q, status: "Accepted" } : q,
+            ),
+            customers,
+            ledger,
           };
         });
       },
-      recordInvoicePayment: (invoiceId, amount) => {
-        const pay = Number(amount || 0);
-        if (pay <= 0) return;
-        setState((prev) => ({
-          ...prev,
-          invoices: prev.invoices.map((inv) => {
-            if (inv.invoice_id !== invoiceId) return inv;
-            const paid = Math.min(inv.total, inv.paid + pay);
-            const status: InvoiceStatus = paid >= inv.total ? "Paid" : paid > 0 ? "Partial" : "Unpaid";
-            return { ...inv, paid, status };
-          }),
-        }));
+      /** Reject a sent quotation — no charge posted. */
+      /** Ensure a public share token exists (for older quotes created before share links). */
+      ensureQuoteShareToken: (quoteId: string) => {
+        let token = "";
+        setState((prev) => {
+          const q = prev.quotations.find((x) => x.quote_id === quoteId);
+          if (!q) return prev;
+          if (q.share_token) {
+            token = q.share_token;
+            return prev;
+          }
+          token = uid("QTK").replace(/[^a-zA-Z0-9]/g, "").slice(0, 16) || uid("QTK");
+          return {
+            ...prev,
+            quotations: prev.quotations.map((x) =>
+              x.quote_id === quoteId ? { ...x, share_token: token } : x,
+            ),
+          };
+        });
+        return token;
+      },
+      rejectQuotation: (quoteId: string) => {
+        setState((prev) => {
+          const quote = prev.quotations.find((q) => q.quote_id === quoteId);
+          if (!quote || quote.status === "Accepted") return prev;
+          return {
+            ...prev,
+            quotations: prev.quotations.map((q) =>
+              q.quote_id === quoteId ? { ...q, status: "Rejected" } : q,
+            ),
+          };
+        });
+      },
+      updateQuotation: (quoteId, form) => {
+        setState((prev) => {
+          const existing = prev.quotations.find((q) => q.quote_id === quoteId);
+          if (!existing) return prev;
+
+          const customer = prev.customers.find((c) => c.customer_id === form.customerId);
+          const oldCustomer = prev.customers.find((c) => c.customer_id === existing.customer_id);
+          const pricingBusiness = form.pricingBusinessId
+            ? prev.businesses.find((b) => b.business_id === form.pricingBusinessId)
+            : undefined;
+          const lineItemsTotal = (form.lineItems || []).reduce(
+            (s, li) => s + Number(li.amount || 0),
+            0,
+          );
+          const newTotal = form.lineItems?.length ? lineItemsTotal : Number(form.total || 0);
+          const oldTotal = Number(existing.total || 0);
+          const isAccepted = existing.status === "Accepted";
+          const oldCharge = prev.ledger.find(
+            (entry) =>
+              entry.type === "charge" &&
+              entry.reference_type === "quotation" &&
+              entry.reference_id === quoteId,
+          );
+
+          let customers = prev.customers;
+          let ledger = prev.ledger;
+
+          // Only Accepted quotes touch the customer tab / ledger.
+          if (isAccepted) {
+            const sameCustomer = Boolean(
+              customer && oldCustomer && customer.customer_id === oldCustomer.customer_id,
+            );
+            if (sameCustomer && oldCustomer) {
+              const adjustedBalance = Math.max(
+                0,
+                Number(oldCustomer.amount || 0) + (newTotal - oldTotal),
+              );
+              customers = customers.map((c) =>
+                c.customer_id === oldCustomer.customer_id
+                  ? {
+                      ...c,
+                      amount: adjustedBalance,
+                      status: dueStatus(c.due_date, adjustedBalance),
+                    }
+                  : c,
+              );
+            } else {
+              if (oldCustomer && oldTotal > 0) {
+                const oldBalance = Math.max(0, Number(oldCustomer.amount || 0) - oldTotal);
+                customers = customers.map((c) =>
+                  c.customer_id === oldCustomer.customer_id
+                    ? {
+                        ...c,
+                        amount: oldBalance,
+                        status: dueStatus(c.due_date, oldBalance),
+                      }
+                    : c,
+                );
+              }
+              if (customer && newTotal > 0) {
+                const newBalance = Number(customer.amount || 0) + newTotal;
+                customers = customers.map((c) =>
+                  c.customer_id === customer.customer_id
+                    ? {
+                        ...c,
+                        amount: newBalance,
+                        status: dueStatus(c.due_date, newBalance),
+                      }
+                    : c,
+                );
+              }
+            }
+
+            if (oldCharge) {
+              ledger = ledger.filter((entry) => entry.entry_id !== oldCharge.entry_id);
+            }
+            if (customer && newTotal > 0) {
+              ledger = [
+                {
+                  entry_id: uid("LED"),
+                  business_id: customer.business_id,
+                  customer_id: customer.customer_id,
+                  type: "charge" as const,
+                  amount: newTotal,
+                  description: `Quotation ${quoteId}`,
+                  product_id: "",
+                  qty: 1,
+                  posted_by: prev.currentUserId,
+                  date: oldCharge?.date || existing.date || new Date().toISOString(),
+                  reference_id: quoteId,
+                  reference_type: "quotation" as const,
+                },
+                ...ledger,
+              ];
+            }
+          }
+
+          return {
+            ...prev,
+            quotations: prev.quotations.map((q) =>
+              q.quote_id !== quoteId
+                ? q
+                : {
+                    ...q,
+                    customer_id: form.customerId,
+                    customer_name: customer?.name ?? q.customer_name,
+                    total: newTotal,
+                    notes: form.notes,
+                    quote_type: form.quoteType || q.quote_type || "general",
+                    pricing_business_id: form.pricingBusinessId,
+                    pricing_business_name: pricingBusiness?.business_name,
+                    line_items: form.lineItems,
+                    status: q.status === "Draft" ? "Sent" : q.status,
+                  },
+            ),
+            customers,
+            ledger,
+          };
+        });
       },
       uploadRequestPictures: (requestId, pictures) => {
         setState((prev) => ({
@@ -1636,7 +1820,9 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               (b.owner_user_id === user.user_id || user.account_level === "admin"),
           );
           if (!canRecordPayment({ customer, user, isBusinessOwner: owner })) return prev;
-          const nextAmount = Math.max(0, customer.amount - amount);
+          const paymentAmount = Math.min(Number(customer.amount || 0), amount);
+          if (paymentAmount <= 0) return prev;
+          const nextAmount = Math.max(0, Number(customer.amount || 0) - paymentAmount);
           return {
             ...prev,
             customers: prev.customers.map((c) =>
@@ -1650,7 +1836,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
                 business_id: customer.business_id,
                 customer_id: customer.customer_id,
                 type: "payment",
-                amount,
+                amount: paymentAmount,
                 description: form.description || "Payment received",
                 product_id: "",
                 qty: 0,

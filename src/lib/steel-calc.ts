@@ -11,7 +11,7 @@ export type PriceableItem = {
   specs?: Record<string, string | number>;
 };
 
-export type SteelCategory = "plates" | "rhs" | "shs" | "chs" | "shaft" | "cement";
+export type SteelCategory = "plates" | "rhs" | "shs" | "chs" | "shaft" | "angle" | "ibeam" | "channel" | "flat_bar" | "mesh" | "cement";
 
 export const STEEL_CATEGORY_LABELS: Record<SteelCategory, string> = {
   plates: "Plate / Sheet",
@@ -19,6 +19,11 @@ export const STEEL_CATEGORY_LABELS: Record<SteelCategory, string> = {
   shs: "SHS (Square Hollow Section)",
   chs: "CHS (Circular Hollow Section)",
   shaft: "Round Shaft / Bar",
+  angle: "MS Angle / Angle Iron",
+  ibeam: "I-Beam / IPE / Universal Beam",
+  channel: "C-Channel / U-Channel",
+  flat_bar: "Flat Bar",
+  mesh: "Welded Mesh / BRC",
   cement: "Cement / bagged materials",
 };
 
@@ -28,6 +33,11 @@ export const STEEL_GRADES: Record<SteelCategory, string[]> = {
   shs: ["MS (Mild Steel)", "GI (Galvanised Iron)", "SS 201", "SS 304"],
   chs: ["MS (Mild Steel)", "GI (Galvanised Iron)", "SS 201", "SS 304", "Class A", "Class B", "Class C"],
   shaft: ["MS (Mild Steel)", "SS 304", "Brass", "Aluminium"],
+  angle: ["MS (Mild Steel)", "GI (Galvanised Iron)", "SS 304"],
+  ibeam: ["MS (Mild Steel)"],
+  channel: ["MS (Mild Steel)"],
+  flat_bar: ["MS (Mild Steel)", "SS 304"],
+  mesh: ["MS (Mild Steel)", "Galvanised"],
   cement: ["OPC 42.5", "OPC 32.5", "PLC", "General purpose"],
 };
 
@@ -59,6 +69,28 @@ export const STEEL_SPECS: Record<SteelCategory, SteelSpecField[]> = {
   shaft: [
     { id: "dia", label: "Diameter (mm)" },
     { id: "length", label: "Cut length (mm)" },
+  ],
+  angle: [
+    { id: "size", label: "Angle size (e.g. 50×50×5 mm)" },
+    { id: "length", label: "Cut length (mm)" },
+  ],
+  ibeam: [
+    { id: "size", label: "Section (e.g. IPE 200 / UB 203)" },
+    { id: "length", label: "Cut length (mm)" },
+  ],
+  channel: [
+    { id: "size", label: "Section (e.g. C 100 / U 100)" },
+    { id: "length", label: "Cut length (mm)" },
+  ],
+  flat_bar: [
+    { id: "width", label: "Width (mm)" },
+    { id: "thickness", label: "Thickness (mm)" },
+    { id: "length", label: "Cut length (mm)" },
+  ],
+  mesh: [
+    { id: "size", label: "Mesh specification" },
+    { id: "length", label: "Piece length (mm)" },
+    { id: "width", label: "Piece width (mm)" },
   ],
   cement: [
     { id: "bags", label: "Bags needed" },
@@ -167,6 +199,13 @@ export function massPerMetreKg(
       const { dia = 0 } = dims;
       return (Math.PI / 4) * dia * dia * d * 1000;
     }
+    case "angle":
+    case "ibeam":
+    case "channel":
+    case "flat_bar":
+      return 0;
+    case "mesh":
+      return 0;
     default:
       return 0;
   }
@@ -280,7 +319,7 @@ export type BarNestResult = {
 
 /** Nest linear cuts onto stock bars (default 6 m). */
 export function nestBarOnStock(
-  category: Exclude<SteelCategory, "plates" | "cement">,
+  category: Exclude<SteelCategory, "plates" | "cement" | "mesh">,
   grade: string,
   dims: Record<string, number>,
   qty: number,
@@ -373,6 +412,7 @@ export function matchSteelProduct(
   category: SteelCategory,
   grade: string,
   dims: Record<string, number>,
+  sizeText?: string,
 ): MatchedRate | null {
   const catTokens = STEEL_CATEGORY_LABELS[category]
     .toLowerCase()
@@ -388,6 +428,13 @@ export function matchSteelProduct(
     .filter(Boolean);
   const thicknessToken = dims.thickness ? `${dims.thickness}` : null;
   const odToken = dims.od ? `${dims.od}` : dims.dia ? `${dims.dia}` : null;
+  const sizeToken = sizeText ? sizeText.toLowerCase().replace(/\s+/g, "") : null;
+
+  if (category === "angle") catTokens.push("angle", "angle iron", "ms angle");
+  if (category === "ibeam") catTokens.push("ibeam", "i-beam", "ipe", "universal beam", "ub");
+  if (category === "channel") catTokens.push("channel", "c-channel", "u-channel", "uc");
+  if (category === "flat_bar") catTokens.push("flat", "flat bar");
+  if (category === "mesh") catTokens.push("mesh", "brc", "welded mesh");
 
   let best: MatchedRate | null = null;
   for (const p of products) {
@@ -400,6 +447,10 @@ export function matchSteelProduct(
       score += 3;
     }
     if (odToken && (hay.includes(`${odToken}mm`) || hay.includes(odToken))) score += 2;
+    if (sizeToken) {
+      const compactHay = hay.replace(/\s+/g, "");
+      if (compactHay.includes(sizeToken)) score += 7;
+    }
     // Structured catalogue specs
     if (thicknessToken && String(specs.thickness ?? specs.wall_thickness ?? "") === thicknessToken) {
       score += 4;

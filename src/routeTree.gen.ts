@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
 import { Route as AppBusinessesRouteImport } from './routes/_app/businesses'
+import { Route as AppCatalogueRouteImport } from './routes/_app/catalogue'
 import { Route as AppCategoriesRouteImport } from './routes/_app/categories'
 import { Route as AppCollectionsRouteImport } from './routes/_app/collections'
 import { Route as AppCustomersRouteImport } from './routes/_app/customers'
@@ -37,6 +38,7 @@ import { Route as AppTabRouteImport } from './routes/_app/tab'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
 import { Route as AppVariantsRouteImport } from './routes/_app/variants'
 import { Route as AppWorkRouteImport } from './routes/_app/work'
+import { Route as QuoteTokenRouteImport } from './routes/quote.$token'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -55,6 +57,11 @@ const AppAssetsRoute = AppAssetsRouteImport.update({
 const AppBusinessesRoute = AppBusinessesRouteImport.update({
   id: '/businesses',
   path: '/businesses',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCatalogueRoute = AppCatalogueRouteImport.update({
+  id: '/catalogue',
+  path: '/catalogue',
   getParentRoute: () => AppRoute,
 } as any)
 const AppCategoriesRoute = AppCategoriesRouteImport.update({
@@ -177,11 +184,17 @@ const AppWorkRoute = AppWorkRouteImport.update({
   path: '/work',
   getParentRoute: () => AppRoute,
 } as any)
+const QuoteTokenRoute = QuoteTokenRouteImport.update({
+  id: '/quote/$token',
+  path: '/quote/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/assets': typeof AppAssetsRoute
   '/businesses': typeof AppBusinessesRoute
+  '/catalogue': typeof AppCatalogueRoute
   '/categories': typeof AppCategoriesRoute
   '/collections': typeof AppCollectionsRoute
   '/customers': typeof AppCustomersRoute
@@ -206,10 +219,12 @@ export interface FileRoutesByFullPath {
   '/users': typeof AppUsersRoute
   '/variants': typeof AppVariantsRoute
   '/work': typeof AppWorkRoute
+  '/quote/$token': typeof QuoteTokenRoute
 }
 export interface FileRoutesByTo {
   '/assets': typeof AppAssetsRoute
   '/businesses': typeof AppBusinessesRoute
+  '/catalogue': typeof AppCatalogueRoute
   '/categories': typeof AppCategoriesRoute
   '/collections': typeof AppCollectionsRoute
   '/customers': typeof AppCustomersRoute
@@ -234,6 +249,7 @@ export interface FileRoutesByTo {
   '/users': typeof AppUsersRoute
   '/variants': typeof AppVariantsRoute
   '/work': typeof AppWorkRoute
+  '/quote/$token': typeof QuoteTokenRoute
   '/': typeof AppIndexRoute
 }
 export interface FileRoutesById {
@@ -241,6 +257,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/_app/assets': typeof AppAssetsRoute
   '/_app/businesses': typeof AppBusinessesRoute
+  '/_app/catalogue': typeof AppCatalogueRoute
   '/_app/categories': typeof AppCategoriesRoute
   '/_app/collections': typeof AppCollectionsRoute
   '/_app/customers': typeof AppCustomersRoute
@@ -265,6 +282,7 @@ export interface FileRoutesById {
   '/_app/users': typeof AppUsersRoute
   '/_app/variants': typeof AppVariantsRoute
   '/_app/work': typeof AppWorkRoute
+  '/quote/$token': typeof QuoteTokenRoute
   '/_app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
@@ -273,6 +291,7 @@ export interface FileRouteTypes {
     | '/'
     | '/assets'
     | '/businesses'
+    | '/catalogue'
     | '/categories'
     | '/collections'
     | '/customers'
@@ -297,10 +316,12 @@ export interface FileRouteTypes {
     | '/users'
     | '/variants'
     | '/work'
+    | '/quote/$token'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/assets'
     | '/businesses'
+    | '/catalogue'
     | '/categories'
     | '/collections'
     | '/customers'
@@ -325,12 +346,14 @@ export interface FileRouteTypes {
     | '/users'
     | '/variants'
     | '/work'
+    | '/quote/$token'
     | '/'
   id:
     | '__root__'
     | '/_app'
     | '/_app/assets'
     | '/_app/businesses'
+    | '/_app/catalogue'
     | '/_app/categories'
     | '/_app/collections'
     | '/_app/customers'
@@ -355,11 +378,13 @@ export interface FileRouteTypes {
     | '/_app/users'
     | '/_app/variants'
     | '/_app/work'
+    | '/quote/$token'
     | '/_app/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
+  QuoteTokenRoute: typeof QuoteTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -390,6 +415,13 @@ declare module '@tanstack/react-router' {
       path: '/businesses'
       fullPath: '/businesses'
       preLoaderRoute: typeof AppBusinessesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/catalogue': {
+      id: '/_app/catalogue'
+      path: '/catalogue'
+      fullPath: '/catalogue'
+      preLoaderRoute: typeof AppCatalogueRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/categories': {
@@ -560,12 +592,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkRouteImport
       parentRoute: typeof AppRoute
     }
+    '/quote/$token': {
+      id: '/quote/$token'
+      path: '/quote/$token'
+      fullPath: '/quote/$token'
+      preLoaderRoute: typeof QuoteTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 interface AppRouteChildren {
   AppAssetsRoute: typeof AppAssetsRoute
   AppBusinessesRoute: typeof AppBusinessesRoute
+  AppCatalogueRoute: typeof AppCatalogueRoute
   AppCategoriesRoute: typeof AppCategoriesRoute
   AppCollectionsRoute: typeof AppCollectionsRoute
   AppCustomersRoute: typeof AppCustomersRoute
@@ -596,6 +636,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAssetsRoute: AppAssetsRoute,
   AppBusinessesRoute: AppBusinessesRoute,
+  AppCatalogueRoute: AppCatalogueRoute,
   AppCategoriesRoute: AppCategoriesRoute,
   AppCollectionsRoute: AppCollectionsRoute,
   AppCustomersRoute: AppCustomersRoute,
@@ -627,6 +668,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
+  QuoteTokenRoute: QuoteTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

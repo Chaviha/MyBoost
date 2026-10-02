@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
 import { MoreActions } from "@/components/more-actions";
 import { Toolbar } from "@/components/app-shell";
+import { CatalogueSubnav } from "@/components/catalogue-subnav";
 import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
 import { Badge } from "@/components/ui/badge";
@@ -55,11 +56,12 @@ function CategoriesPage() {
   return (
     <>
       <Toolbar
-        title="Categories"
-        subtitle={`Each category is a table style for ${selectedBusiness.business_name}. Steel, restaurant, retail and other trades use different columns.`}
+        title="Catalogue · Categories"
+        subtitle={`Group items for ${selectedBusiness.business_name}. Each category defines columns used by products and services.`}
         actionLabel="Add category"
         onAction={() => setOpen(true)}
       />
+      <CatalogueSubnav />
 
       <Card className="mb-4 p-4 text-sm text-ink-muted">
         <p className="font-medium text-ink">Table styles for this business type ({selectedBusiness.business_type})</p>

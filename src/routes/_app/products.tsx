@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
 import { Toolbar } from "@/components/app-shell";
+import { CatalogueSubnav } from "@/components/catalogue-subnav";
 import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
 import { ListingCover } from "@/components/listing-cover";
@@ -132,15 +133,16 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
   return (
     <>
       <Toolbar
-        title={isService ? "Services" : "Products"}
+        title={isService ? "Catalogue · Items · Service" : "Catalogue · Items · Product"}
         subtitle={
           isService
-            ? `Services offered by ${selectedBusiness.business_name} (cutting, labour, consulting…). Kept separate from stocked products.`
-            : `Stocked goods for ${selectedBusiness.business_name}. Services are managed under Catalogue → Services.`
+            ? `Service items for ${selectedBusiness.business_name}: specifications + pricing (no stock). Labour, cutting, transport, paint…`
+            : `Product items for ${selectedBusiness.business_name}: specifications, optional options, pricing, optional stock.`
         }
         actionLabel={isService ? "Add service" : "Add product"}
         onAction={() => setOpen(true)}
       />
+      <CatalogueSubnav />
 
       <div className="mb-4 flex flex-wrap gap-2">
         <Button type="button" variant="secondary" size="sm" onClick={() => setImportOpen(true)}>

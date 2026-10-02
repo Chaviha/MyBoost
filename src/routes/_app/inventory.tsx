@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Package } from "lucide-react";
 import { AccessDenied } from "@/components/access-denied";
 import { Toolbar } from "@/components/app-shell";
+import { CatalogueSubnav } from "@/components/catalogue-subnav";
 import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -33,9 +34,10 @@ function InventoryPage() {
   return (
     <>
       <Toolbar
-        title="Inventory"
-        subtitle={`Stock levels for ${selectedBusiness.business_name}. Adjust stock from the Products page for now.`}
+        title="Catalogue · Stock (optional)"
+        subtitle={`Product stock for ${selectedBusiness.business_name}. Services have no stock. Adjust on Items · Product.`}
       />
+      <CatalogueSubnav />
 
       {products.length === 0 ? (
         <EmptyState icon={Package} text="No products yet — add products to track inventory." />

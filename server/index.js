@@ -627,6 +627,195 @@ app.post("/api/public/marketplace/businesses/:businessId/contact", async (req, r
   } catch (error) { next(error); }
 });
 
+/** Find a quotation by public share_token across all user_state blobs. */
+async function findQuoteByShareToken(token) {
+  const t = String(token || "").trim();
+  if (!t) return null;
+  const rows = await pool.query("SELECT user_id, state FROM user_state");
+  for (const row of rows.rows) {
+    const state = row.state || {};
+    const quotes = Array.isArray(state.quotations) ? state.quotations : [];
+    const quote = quotes.find((q) => q && q.share_token === t);
+    if (!quote) continue;
+    const business = Array.isArray(state.businesses)
+      ? state.businesses.find((b) => b.business_id === quote.business_id)
+      : null;
+    const customer = Array.isArray(state.customers)
+      ? state.customers.find((c) => c.customer_id === quote.customer_id)
+      : null;
+    return { userId: row.user_id, state, quote, business, customer };
+  }
+  return null;
+}
+
+function dueStatusServer(dueDate, amount) {
+  const n = Number(amount || 0);
+  if (n <= 0) return "Settled";
+  if (!dueDate) return "Open";
+  const due = new Date(dueDate).getTime();
+  if (!Number.isFinite(due)) return "Open";
+  return due < Date.now() ? "Overdue" : "Open";
+}
+
+/** Public: customer views quotation without login */
+app.get("/api/public/quote/:token", async (req, res, next) => {
+  try {
+    const found = await findQuoteByShareToken(req.params.token);
+    if (!found) return res.status(404).json({ error: "Quotation not found or link expired." });
+    const { quote, business } = found;
+    res.json({
+      quote: {
+        quote_id: quote.quote_id,
+        customer_name: quote.customer_name,
+        total: quote.total,
+        status: quote.status,
+        date: quote.date,
+        notes: quote.notes || "",
+        quote_type: quote.quote_type || "general",
+        line_items: Array.isArray(quote.line_items) ? quote.line_items : [],
+      },
+      business: {
+        business_name: business?.business_name || "Business",
+        phone: business?.phone || "",
+        email: business?.email || "",
+        region: business?.region || "",
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Public: customer Accept / Reject.
+ * Accept posts charge to customer tab + ledger (same rules as in-app accept).
+ */
+app.post("/api/public/quote/:token/respond", async (req, res, next) => {
+  try {
+    const decision = String(req.body?.decision || "").toLowerCase();
+    if (decision !== "accept" && decision !== "reject") {
+      return res.status(400).json({ error: "decision must be accept or reject" });
+    }
+    const found = await findQuoteByShareToken(req.params.token);
+    if (!found) return res.status(404).json({ error: "Quotation not found or link expired." });
+    const { userId, state, quote } = found;
+    if (quote.status === "Accepted") {
+      return res.json({ ok: true, status: "Accepted", message: "Already accepted." });
+    }
+    if (quote.status === "Rejected" && decision === "accept") {
+      return res.status(400).json({ error: "This quotation was rejected and cannot be accepted." });
+    }
+    if (quote.status === "Rejected") {
+      return res.json({ ok: true, status: "Rejected", message: "Already rejected." });
+    }
+
+    const quotes = Array.isArray(state.quotations) ? state.quotations : [];
+    const qIndex = quotes.findIndex((q) => q.quote_id === quote.quote_id);
+    if (qIndex < 0) return res.status(404).json({ error: "Quotation not found." });
+
+    if (decision === "reject") {
+      quotes[qIndex] = { ...quotes[qIndex], status: "Rejected" };
+      state.quotations = quotes;
+      await pool.query(
+        "UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2",
+        [JSON.stringify(state), userId],
+      );
+      return res.json({ ok: true, status: "Rejected" });
+    }
+
+    // accept
+    const total = Number(quote.total || 0);
+    const customers = Array.isArray(state.customers) ? state.customers : [];
+    const cIndex = customers.findIndex((c) => c.customer_id === quote.customer_id);
+    let ledger = Array.isArray(state.ledger) ? state.ledger : [];
+    const alreadyCharged = ledger.some(
+      (e) =>
+        e &&
+        e.type === "charge" &&
+        e.reference_type === "quotation" &&
+        e.reference_id === quote.quote_id,
+    );
+
+    if (cIndex >= 0 && total > 0 && !alreadyCharged) {
+      const customer = customers[cIndex];
+      const nextAmount = Number(customer.amount || 0) + total;
+      customers[cIndex] = {
+        ...customer,
+        amount: nextAmount,
+        status: dueStatusServer(customer.due_date, nextAmount),
+      };
+      ledger = [
+        {
+          entry_id: `LED${Date.now().toString(36)}`,
+          business_id: customer.business_id,
+          customer_id: customer.customer_id,
+          type: "charge",
+          amount: total,
+          description: `Quotation ${quote.quote_id}${quote.notes ? ` — ${quote.notes}` : ""}`,
+          product_id: "",
+          qty: 1,
+          posted_by: "customer",
+          date: new Date().toISOString(),
+          reference_id: quote.quote_id,
+          reference_type: "quotation",
+        },
+        ...ledger,
+      ];
+      state.customers = customers;
+      state.ledger = ledger;
+    }
+
+    quotes[qIndex] = { ...quotes[qIndex], status: "Accepted" };
+    state.quotations = quotes;
+    await pool.query(
+      "UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2",
+      [JSON.stringify(state), userId],
+    );
+    res.json({ ok: true, status: "Accepted" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Optional: email the review link to the customer (uses SMTP if configured). */
+app.post("/api/public/quote/:token/email", async (req, res, next) => {
+  try {
+    const found = await findQuoteByShareToken(req.params.token);
+    if (!found) return res.status(404).json({ error: "Quotation not found." });
+    const to =
+      String(req.body?.to || found.customer?.email || "").trim() ||
+      "";
+    if (!to || !/^\S+@\S+\.\S+$/.test(to)) {
+      return res.status(400).json({ error: "Customer has no valid email. Add email on the customer or pass to=." });
+    }
+    const origin = String(req.body?.origin || process.env.APP_ORIGIN || "").replace(/\/$/, "");
+    const link = origin
+      ? `${origin}/quote/${encodeURIComponent(req.params.token)}`
+      : `/quote/${encodeURIComponent(req.params.token)}`;
+    const biz = found.business?.business_name || "Business";
+    const total = Number(found.quote.total || 0).toLocaleString("en-KE");
+    if (!mailer) {
+      return res.status(503).json({
+        error: "Email is not configured (set SMTP_HOST). Use WhatsApp or copy link instead.",
+        link,
+      });
+    }
+    await mailer.sendMail({
+      from: process.env.SMTP_FROM || "LifeBoost <no-reply@lifeboost.ke>",
+      to,
+      subject: `Quotation from ${biz} — please review`,
+      text: `Hello ${found.quote.customer_name},\n\n${biz} sent you a quotation totaling KSh ${total}.\n\nReview and accept or reject here:\n${link}\n\nThank you.`,
+      html: `<p>Hello ${found.quote.customer_name},</p>
+        <p><strong>${biz}</strong> sent you a quotation totaling <strong>KSh ${total}</strong>.</p>
+        <p><a href="${link}">Review &amp; Accept quotation</a></p>
+        <p style="color:#666;font-size:12px">If the button does not work, copy this link:<br/>${link}</p>`,
+    });
+    res.json({ ok: true, to, link });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/relationships/invite", auth, async (req, res, next) => {
   const client = await pool.connect();
   try {

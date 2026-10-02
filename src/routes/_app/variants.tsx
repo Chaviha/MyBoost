@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
 import { MoreActions } from "@/components/more-actions";
 import { Toolbar } from "@/components/app-shell";
+import { CatalogueSubnav } from "@/components/catalogue-subnav";
 import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
 import { Badge } from "@/components/ui/badge";
@@ -75,7 +76,7 @@ function VariantsPage() {
   return (
     <>
       <Toolbar
-        title="Variants"
+        title="Catalogue · Options (optional)"
         subtitle={`Size / grade rows for ${selectedBusiness.business_name}. Columns follow the parent product’s category table style.`}
         actionLabel="Add variant"
         onAction={() => {
@@ -86,6 +87,7 @@ function VariantsPage() {
           setOpen(true);
         }}
       />
+      <CatalogueSubnav />
 
       {businessProducts.length > 0 ? (
         <div className="mb-4 flex flex-wrap items-center gap-2">

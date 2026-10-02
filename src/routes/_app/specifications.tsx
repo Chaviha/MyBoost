@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
 import { MoreActions } from "@/components/more-actions";
 import { Toolbar } from "@/components/app-shell";
+import { CatalogueSubnav } from "@/components/catalogue-subnav";
 import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
 import { Badge } from "@/components/ui/badge";
@@ -58,7 +59,7 @@ function SpecificationsPage() {
   return (
     <>
       <Toolbar
-        title="Specifications"
+        title="Catalogue · Specifications"
         subtitle={`Table columns for this business. Use ← → to rearrange order after adding a field late for ${selectedBusiness.business_name}. Example: nominal bore 50 mm, OD 60.3 mm, 5.43 kg/m, 6.24 MPa.`}
         actionLabel="Add specification"
         onAction={() => {
@@ -69,6 +70,7 @@ function SpecificationsPage() {
           setOpen(true);
         }}
       />
+      <CatalogueSubnav />
 
       {businessCategories.length > 0 ? (
         <div className="mb-4 flex flex-wrap items-center gap-2">

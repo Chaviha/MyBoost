@@ -91,6 +91,9 @@ export type LedgerEntry = {
   qty: number;
   posted_by: string;
   date: string;
+  /** Optional source record for automatically generated financial entries. */
+  reference_id?: string;
+  reference_type?: "quotation" | "invoice" | "manual";
 };
 
 export type Employee = {
@@ -314,6 +317,8 @@ export type Quotation = {
   pricing_business_id?: string;
   pricing_business_name?: string;
   line_items?: QuoteLineItem[];
+  /** Public review link token (customer opens /quote/<token> without login) */
+  share_token?: string;
 };
 
 export type Invoice = {

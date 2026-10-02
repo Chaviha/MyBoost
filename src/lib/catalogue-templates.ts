@@ -5,6 +5,7 @@ export type CatalogueTemplateId =
   | "steel_chs"
   | "steel_plate"
   | "steel_bar"
+  | "steel_section"
   | "cement_building"
   | "hardware_general"
   | "restaurant"
@@ -80,6 +81,20 @@ export const CATALOGUE_TEMPLATES: CatalogueTemplate[] = [
       { key: "length_m", label: "Length", unit: "m", data_type: "number" },
       { key: "grade", label: "Grade", unit: "", data_type: "text" },
       { key: "mass_kg_m", label: "Mass", unit: "kg/m", data_type: "number" },
+    ],
+  },
+  {
+    id: "steel_section",
+    name: "Structural steel section",
+    description: "RHS, SHS, angles, I-beams, channels, flats and other standard sections using catalogue mass per metre.",
+    unit_default: "m",
+    business_types: ["Construction", "Manufacturing", "Retail"],
+    fields: [
+      { key: "size", label: "Section size / designation", unit: "", data_type: "text" },
+      { key: "thickness", label: "Thickness", unit: "mm", data_type: "number" },
+      { key: "mass_kg_m", label: "Mass", unit: "kg/m", data_type: "number" },
+      { key: "standard_length_m", label: "Standard length", unit: "m", data_type: "number" },
+      { key: "grade", label: "Grade", unit: "", data_type: "text" },
     ],
   },
   {
