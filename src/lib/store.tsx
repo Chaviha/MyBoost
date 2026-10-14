@@ -1994,11 +1994,6 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           const total = form.lineItems?.length ? lineItemsTotal : Number(form.total || 0);
           const quoteId = uid("QTE");
           const quoteDate = new Date().toISOString();
-<<<<<<< HEAD
-
-          // Review & Accept: quote is only "Sent" until explicitly accepted.
-          // No customer charge / balance change until acceptQuotation.
-=======
           const quoteSettings = (prev.pricing_settings || []).find(
             (x) => x.business_id === bid,
           ) || {
@@ -2016,21 +2011,14 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           // Review & Accept: quote is only "Sent" until explicitly accepted.
           // No customer charge / balance change until acceptQuotation.
           // customer_id is the OWNER's tab id; sync maps it to the customer's local tab.
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
           return {
             ...prev,
             quotations: [
               {
                 quote_id: quoteId,
-<<<<<<< HEAD
-                business_id: prev.selectedBusinessId,
-                customer_id: form.customerId,
-                customer_name: customer?.name ?? "Customer",
-=======
                 business_id: bid,
                 customer_id: customer.customer_id,
                 customer_name: customer.name || "Customer",
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
                 total,
                 status: "Sent",
                 date: quoteDate,
@@ -2039,10 +2027,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
                 pricing_business_id: form.pricingBusinessId,
                 pricing_business_name: pricingBusiness?.business_name,
                 line_items: form.lineItems,
-<<<<<<< HEAD
-=======
                 calculation,
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
                 share_token: uid("QTK").replace(/[^a-zA-Z0-9]/g, "").slice(0, 16) || uid("QTK"),
               },
               ...prev.quotations,
@@ -2139,15 +2124,12 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           };
         });
       },
-<<<<<<< HEAD
-=======
       markQuotationReviewed: (quoteId: string) => {
         setState((prev) => ({ ...prev, quotations: prev.quotations.map((q) => q.quote_id === quoteId && q.status === "Received" ? { ...q, status: "Reviewed" } : q) }));
       },
       requestQuotationChanges: (quoteId: string, message: string) => {
         setState((prev) => ({ ...prev, quotations: prev.quotations.map((q) => q.quote_id === quoteId && q.status !== "Accepted" && q.status !== "Rejected" ? { ...q, status: "Changes requested", notes: `${q.notes ? `${q.notes}\n\n` : ""}Requested changes: ${message}` } : q) }));
       },
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
       updateQuotation: (quoteId, form) => {
         setState((prev) => {
           const existing = prev.quotations.find((q) => q.quote_id === quoteId);
@@ -2163,8 +2145,6 @@ export function LifeProvider({ children }: { children: ReactNode }) {
             0,
           );
           const newTotal = form.lineItems?.length ? lineItemsTotal : Number(form.total || 0);
-<<<<<<< HEAD
-=======
           const quoteSettings = (prev.pricing_settings || []).find(
             (x) => x.business_id === existing.business_id,
           ) || {
@@ -2178,7 +2158,6 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           const calculation = form.lineItems?.length
             ? calculateQuotation(form.lineItems, quoteSettings)
             : undefined;
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
           const oldTotal = Number(existing.total || 0);
           const isAccepted = existing.status === "Accepted";
           const oldCharge = prev.ledger.find(

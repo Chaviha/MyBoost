@@ -1,7 +1,7 @@
 node_modules/
 dist/
 .output/
-
+.vercel/
 .DS_Store
 .env
 .env.*
@@ -9,6 +9,4 @@ dist/
 *.log
 
 # Uploaded business photos
-
-.vercel/
 uploads/

@@ -673,22 +673,15 @@ app.post("/api/public/marketplace/businesses/:businessId/contact", async (req, r
   } catch (error) { next(error); }
 });
 
-<<<<<<< HEAD
-/** Find a quotation by public share_token across all user_state blobs. */
-=======
 /** Find a quotation by public share_token across all user_state blobs.
  * Prefer the business owner's copy (source of truth). After owner→customer sync
  * the same share_token can exist on both accounts — never treat the customer's
  * mirror as the primary record for accept/reject/email. */
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 async function findQuoteByShareToken(token) {
   const t = String(token || "").trim();
   if (!t) return null;
   const rows = await pool.query("SELECT user_id, state FROM user_state");
-<<<<<<< HEAD
-=======
   const matches = [];
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
   for (const row of rows.rows) {
     const state = row.state || {};
     const quotes = Array.isArray(state.quotations) ? state.quotations : [];
@@ -700,11 +693,6 @@ async function findQuoteByShareToken(token) {
     const customer = Array.isArray(state.customers)
       ? state.customers.find((c) => c.customer_id === quote.customer_id)
       : null;
-<<<<<<< HEAD
-    return { userId: row.user_id, state, quote, business, customer };
-  }
-  return null;
-=======
     const isOwner =
       business && String(business.owner_user_id || "") === String(row.user_id);
     matches.push({ userId: row.user_id, state, quote, business, customer, isOwner: !!isOwner });
@@ -718,24 +706,15 @@ async function findQuoteByShareToken(token) {
     business: preferred.business,
     customer: preferred.customer,
   };
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 }
 
 function dueStatusServer(dueDate, amount) {
   const n = Number(amount || 0);
-<<<<<<< HEAD
-  if (n <= 0) return "Settled";
-  if (!dueDate) return "Open";
-  const due = new Date(dueDate).getTime();
-  if (!Number.isFinite(due)) return "Open";
-  return due < Date.now() ? "Overdue" : "Open";
-=======
   if (n <= 0) return "Paid";
   if (!dueDate) return "Pending";
   const due = new Date(dueDate).getTime();
   if (!Number.isFinite(due)) return "Pending";
   return due < Date.now() ? "Overdue" : "Pending";
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 }
 
 /** Public: customer views quotation without login */

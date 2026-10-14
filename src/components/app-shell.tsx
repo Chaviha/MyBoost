@@ -74,12 +74,8 @@ const NAV: NavGroup[] = [
     items: [
       { to: "/businesses", label: "Businesses", icon: Building2, perm: "manage_own_businesses" },
       { to: "/customers", label: "Customers", icon: Users, perm: "manage_customers" },
-<<<<<<< HEAD
-      { to: "/employees", label: "Professionals", icon: BriefcaseBusiness, perm: "manage_employees" },
-=======
       { to: "/employees", label: "Team", icon: BriefcaseBusiness, perm: "manage_employees" },
       { to: "/catalogue", label: "Catalogue", icon: Boxes, perm: "view_products" },
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
       { to: "/quotations", label: "Quotations", icon: ListChecks, perm: "manage_quotes" },
       { to: "/invoices", label: "Invoices", icon: CreditCard, perm: "manage_quotes" },
       { to: "/jobs", label: "Jobs", icon: ClipboardList, perm: "manage_jobs" },
@@ -89,27 +85,8 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-<<<<<<< HEAD
-    id: "catalogue",
-    section: "Catalogue",
-    items: [
-      { to: "/catalogue", label: "Overview", icon: Store, perm: "view_products" },
-      { to: "/categories", label: "Categories", icon: Tags, perm: "view_products" },
-      { to: "/products", label: "Items · Product", icon: Boxes, perm: "view_products" },
-      { to: "/services", label: "Items · Service", icon: BriefcaseBusiness, perm: "view_products" },
-      // Deep setup (also linked from product/service structure bar)
-      { to: "/specifications", label: "Specifications", icon: ListTree, perm: "view_products" },
-      { to: "/variants", label: "Options", icon: Layers, perm: "view_products" },
-      { to: "/inventory", label: "Stock", icon: Package, perm: "view_products" },
-    ],
-  },
-  {
-    id: "professional",
-    section: "Professional",
-=======
     id: "work",
     section: "My work",
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
     items: [
       { to: "/work", label: "My jobs", icon: ClipboardList, when: "employee" },
       { to: "/requests", label: "Requests", icon: Send, when: "employee" },

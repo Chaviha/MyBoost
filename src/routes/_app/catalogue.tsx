@@ -37,11 +37,6 @@ const TREE = [
     icon: BriefcaseBusiness,
     children: [
       { label: "Specifications", to: "/specifications", icon: ListTree },
-<<<<<<< HEAD
-      { label: "Pricing", to: "/services", icon: BriefcaseBusiness },
-    ],
-  },
-=======
       { label: "Pricing", to: "/pricing", icon: Boxes },
     ],
   },
@@ -51,7 +46,6 @@ const TREE = [
     to: "/pricing",
     icon: Boxes,
   },
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 ] as const;
 
 function CatalogueOverviewPage() {

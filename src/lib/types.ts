@@ -395,8 +395,6 @@ export type Quotation = {
   line_items?: QuoteLineItem[];
   /** Public review link token (customer opens /quote/<token> without login) */
   share_token?: string;
-<<<<<<< HEAD
-=======
   calculation?: {
     material_cost: number;
     labour_cost: number;
@@ -408,7 +406,6 @@ export type Quotation = {
     margin_percent: number;
     waste_percent: number;
   };
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 };
 
 export type Invoice = {

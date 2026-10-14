@@ -1,0 +1,43 @@
+warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'package-lock.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'package.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/clean-demo-data.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server/index.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/app-shell.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/catalogue-subnav.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/empty-state.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/ui/card.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/ui/dialog.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/lib/ai-contract.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/lib/pricing-engine.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/lib/seed.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/lib/store.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/lib/types.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routeTree.gen.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/_app.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/_app/catalogue.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/_app/categories.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/_app/jobs.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/_app/pricing.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/_app/products.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/_app/quotations.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/routes/_app/tab.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/styles.css', LF will be replaced by CRLF the next time Git touches it
+ .gitignore                          |    6 [32m+[m[31m-[m
+ CATALOGUE-STRUCTURE.md              |    0
+ QUOTATION-FABRICATION-UPDATE.md     |   35 [31m-[m
+ REVIEW-ACCEPT.md                    |   23 [31m-[m
+ package-lock.json                   |   97 [31m--[m
+ package.json                        |   18 [32m+[m[31m-[m
+ quotations.tsx                      | 2007 [31m-----------------------------------[m
+ server/index.js                     |   21 [31m-[m
+ src/components/app-shell.tsx        |   25 [32m+[m[31m-[m
+ src/components/catalogue-subnav.tsx |   67 [31m--[m
+ src/lib/store.tsx                   |   21 [31m-[m
+ src/lib/types.ts                    |    3 [31m-[m
+ src/routes/_app/catalogue.tsx       |    6 [31m-[m
+ src/routes/_app/categories.tsx      |   14 [31m-[m
+ src/routes/_app/quotations.tsx      |   58 [31m-[m
+ 15 files changed, 10 insertions(+), 2391 deletions(-)

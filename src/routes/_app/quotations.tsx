@@ -6,10 +6,7 @@ import {
   Pencil,
   Printer,
   Search,
-<<<<<<< HEAD
-=======
   Sparkles,
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
   Store,
   Trash2,
   Upload,
@@ -87,11 +84,7 @@ export const Route = createFileRoute("/_app/quotations")({
 function statusTone(status: string): "forest" | "amber" | "neutral" | "red" {
   if (status === "Accepted") return "forest";
   if (status === "Rejected") return "red";
-<<<<<<< HEAD
-  if (status === "Sent") return "amber";
-=======
   if (["Sent", "Received", "Changes requested"].includes(status)) return "amber";
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
   return "neutral";
 }
 
@@ -104,24 +97,16 @@ function QuotationsPage() {
     updateQuotation,
     acceptQuotation,
     rejectQuotation,
-<<<<<<< HEAD
-    ensureQuoteShareToken,
-    can,
-=======
     requestQuotationChanges,
     markQuotationReviewed,
     ensureQuoteShareToken,
     can,
     currentUser,
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
   } = useLife();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Quotation | null>(null);
   const [reviewing, setReviewing] = useState<Quotation | null>(null);
   const [search, setSearch] = useState("");
-<<<<<<< HEAD
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-=======
   const [quoteTab, setQuoteTab] = useState("all");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [showAiAssist, setShowAiAssist] = useState(false);
@@ -139,7 +124,6 @@ function QuotationsPage() {
     setAiResult("");
     setAiLoading(false);
   }
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 
   const qSearch = search.trim().toLowerCase();
   // User-controlled date order
@@ -154,11 +138,6 @@ function QuotationsPage() {
     [businessQuotes, sortDir],
   );
 
-<<<<<<< HEAD
-  const filteredQuotes = useMemo(() => {
-    if (!qSearch) return sortedQuotes;
-    return sortedQuotes.filter((q) => {
-=======
   const tabbedQuotes = useMemo(() => sortedQuotes.filter((q) => {
     if (quoteTab === "sent") return ["Sent", "Draft", "Changes requested", "Reviewed"].includes(q.status);
     if (quoteTab === "received") return q.status === "Received";
@@ -169,7 +148,6 @@ function QuotationsPage() {
   const filteredQuotes = useMemo(() => {
     if (!qSearch) return tabbedQuotes;
     return tabbedQuotes.filter((q) => {
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
       const hay = [
         q.customer_name,
         q.notes,
@@ -185,11 +163,7 @@ function QuotationsPage() {
         .toLowerCase();
       return hay.includes(qSearch);
     });
-<<<<<<< HEAD
-  }, [sortedQuotes, qSearch]);
-=======
   }, [tabbedQuotes, qSearch]);
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 
   if (!can("manage_quotes")) {
     return <AccessDenied need="Quotations are for business owners." />;
@@ -282,17 +256,11 @@ function QuotationsPage() {
         actionLabel="New quotation"
         onAction={() => {
           setEditing(null);
-<<<<<<< HEAD
-=======
           resetAi();
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
           setOpen(true);
         }}
       />
 
-<<<<<<< HEAD
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-=======
       <div className="mb-4 overflow-x-auto">
         <Tabs value={quoteTab} onValueChange={setQuoteTab}>
           <TabsList className="w-max">
@@ -305,7 +273,6 @@ function QuotationsPage() {
       </div>
 
       <div className="mb-5 flex flex-wrap items-center gap-2">
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-faint" />
           <Input
@@ -335,11 +302,7 @@ function QuotationsPage() {
       {businessQuotes.length === 0 ? (
         <EmptyState icon={ListChecks} text="No quotations yet." />
       ) : filteredQuotes.length === 0 ? (
-<<<<<<< HEAD
-        <EmptyState icon={Search} text={`No quotations match “${search.trim()}”.`} />
-=======
         <EmptyState icon={Search} text={quoteTab === "received" ? "No quotations received in this workspace yet." : `No quotations match “${search.trim()}”.`} />
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
       ) : (
         <div className="flex flex-col gap-3">
           {filteredQuotes.map((q) => {
@@ -391,8 +354,6 @@ function QuotationsPage() {
                             },
                           ]
                         : []),
-<<<<<<< HEAD
-=======
                       ...(q.status === "Received" ? [
                         {
                           label: "Acknowledge receipt",
@@ -414,7 +375,6 @@ function QuotationsPage() {
                           onSelect: () => { rejectQuotation(q.quote_id); toast.message("Quotation rejected — no charge posted."); },
                         },
                       ] : []),
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
                       {
                         label: "Send WhatsApp",
                         onSelect: () => shareWhatsApp(q),
@@ -553,10 +513,7 @@ function QuotationsPage() {
           if (!v) {
             setOpen(false);
             setEditing(null);
-<<<<<<< HEAD
-=======
             resetAi();
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
           }
         }}
       >
@@ -735,10 +692,7 @@ function QuotationsPage() {
             onCancel={() => {
               setOpen(false);
               setEditing(null);
-<<<<<<< HEAD
-=======
               resetAi();
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
             }}
             onSubmit={(form) => {
               if (editing) {
@@ -749,13 +703,6 @@ function QuotationsPage() {
                     : "Quotation updated.",
                 );
               } else {
-<<<<<<< HEAD
-                addQuotation(form);
-                toast.success("Quotation sent — review & accept to charge the customer.");
-              }
-              setOpen(false);
-              setEditing(null);
-=======
                 const cust = businessCustomers.find((c) => c.customer_id === form.customerId);
                 if (!cust) {
                   toast.error("Select a customer before sending.");
@@ -775,7 +722,6 @@ function QuotationsPage() {
               setOpen(false);
               setEditing(null);
               resetAi();
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
             }}
           />
         </DialogContent>
@@ -804,11 +750,7 @@ function QuoteWizard({
   onSubmit: (form: WizardForm) => void;
   initial?: WizardForm;
 }) {
-<<<<<<< HEAD
-  const { publicMarketplace, selectedBusiness, businessProducts, businessServices } = useLife();
-=======
   const { publicMarketplace, selectedBusiness, businessProducts, businessServices, currentUser } = useLife();
->>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
   const [quoteType, setQuoteType] = useState<QuoteType | null>(initial?.quoteType ?? null);
   const [customerId, setCustomerId] = useState(initial?.customerId ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
