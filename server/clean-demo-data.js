@@ -37,6 +37,10 @@ function cleanState(state) {
   next.expenses = (next.expenses || []).filter((x) => !DEMO_BUSINESS_IDS.has(x?.business_id) && !DEMO_EXPENSE_IDS.has(x?.expense_id));
   next.requests = (next.requests || []).filter((x) => !DEMO_BUSINESS_IDS.has(x?.business_id) && !DEMO_REQUEST_IDS.has(x?.request_id));
   next.products = (next.products || []).filter((x) => !DEMO_BUSINESS_IDS.has(x?.business_id) && !DEMO_PRODUCT_IDS.has(x?.product_id));
+  next.price_history = (next.price_history || []).filter((x) => !DEMO_BUSINESS_IDS.has(x?.business_id));
+  next.labour_rates = (next.labour_rates || []).filter((x) => !DEMO_BUSINESS_IDS.has(x?.business_id));
+  next.transport_rates = (next.transport_rates || []).filter((x) => !DEMO_BUSINESS_IDS.has(x?.business_id));
+  next.pricing_settings = (next.pricing_settings || []).filter((x) => !DEMO_BUSINESS_IDS.has(x?.business_id));
   next.jobs = (next.jobs || []).filter((x) => !DEMO_BUSINESS_IDS.has(x?.business_id) && !DEMO_JOB_IDS.has(x?.job_id));
   next.quotations = (next.quotations || []).filter((x) => !DEMO_BUSINESS_IDS.has(x?.business_id) && !DEMO_QUOTE_IDS.has(x?.quote_id));
   next.invoices = (next.invoices || []).filter((x) => !DEMO_BUSINESS_IDS.has(x?.business_id) && !DEMO_INVOICE_IDS.has(x?.invoice_id));

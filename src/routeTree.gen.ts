@@ -26,6 +26,7 @@ import { Route as AppJobsRouteImport } from './routes/_app/jobs'
 import { Route as AppMarketplaceRouteImport } from './routes/_app/marketplace'
 import { Route as AppMeetingsRouteImport } from './routes/_app/meetings'
 import { Route as AppOffersRouteImport } from './routes/_app/offers'
+import { Route as AppPricingRouteImport } from './routes/_app/pricing'
 import { Route as AppProductsRouteImport } from './routes/_app/products'
 import { Route as AppQuotationsRouteImport } from './routes/_app/quotations'
 import { Route as AppRequestsRouteImport } from './routes/_app/requests'
@@ -124,6 +125,11 @@ const AppOffersRoute = AppOffersRouteImport.update({
   path: '/offers',
   getParentRoute: () => AppRoute,
 } as any)
+const AppPricingRoute = AppPricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppProductsRoute = AppProductsRouteImport.update({
   id: '/products',
   path: '/products',
@@ -207,6 +213,7 @@ export interface FileRoutesByFullPath {
   '/marketplace': typeof AppMarketplaceRoute
   '/meetings': typeof AppMeetingsRoute
   '/offers': typeof AppOffersRoute
+  '/pricing': typeof AppPricingRoute
   '/products': typeof AppProductsRoute
   '/quotations': typeof AppQuotationsRoute
   '/requests': typeof AppRequestsRoute
@@ -237,6 +244,7 @@ export interface FileRoutesByTo {
   '/marketplace': typeof AppMarketplaceRoute
   '/meetings': typeof AppMeetingsRoute
   '/offers': typeof AppOffersRoute
+  '/pricing': typeof AppPricingRoute
   '/products': typeof AppProductsRoute
   '/quotations': typeof AppQuotationsRoute
   '/requests': typeof AppRequestsRoute
@@ -270,6 +278,7 @@ export interface FileRoutesById {
   '/_app/marketplace': typeof AppMarketplaceRoute
   '/_app/meetings': typeof AppMeetingsRoute
   '/_app/offers': typeof AppOffersRoute
+  '/_app/pricing': typeof AppPricingRoute
   '/_app/products': typeof AppProductsRoute
   '/_app/quotations': typeof AppQuotationsRoute
   '/_app/requests': typeof AppRequestsRoute
@@ -304,6 +313,7 @@ export interface FileRouteTypes {
     | '/marketplace'
     | '/meetings'
     | '/offers'
+    | '/pricing'
     | '/products'
     | '/quotations'
     | '/requests'
@@ -334,6 +344,7 @@ export interface FileRouteTypes {
     | '/marketplace'
     | '/meetings'
     | '/offers'
+    | '/pricing'
     | '/products'
     | '/quotations'
     | '/requests'
@@ -366,6 +377,7 @@ export interface FileRouteTypes {
     | '/_app/marketplace'
     | '/_app/meetings'
     | '/_app/offers'
+    | '/_app/pricing'
     | '/_app/products'
     | '/_app/quotations'
     | '/_app/requests'
@@ -508,6 +520,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOffersRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/pricing': {
+      id: '/_app/pricing'
+      path: '/pricing'
+      fullPath: '/pricing'
+      preLoaderRoute: typeof AppPricingRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/products': {
       id: '/_app/products'
       path: '/products'
@@ -618,6 +637,7 @@ interface AppRouteChildren {
   AppMarketplaceRoute: typeof AppMarketplaceRoute
   AppMeetingsRoute: typeof AppMeetingsRoute
   AppOffersRoute: typeof AppOffersRoute
+  AppPricingRoute: typeof AppPricingRoute
   AppProductsRoute: typeof AppProductsRoute
   AppQuotationsRoute: typeof AppQuotationsRoute
   AppRequestsRoute: typeof AppRequestsRoute
@@ -649,6 +669,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppMarketplaceRoute: AppMarketplaceRoute,
   AppMeetingsRoute: AppMeetingsRoute,
   AppOffersRoute: AppOffersRoute,
+  AppPricingRoute: AppPricingRoute,
   AppProductsRoute: AppProductsRoute,
   AppQuotationsRoute: AppQuotationsRoute,
   AppRequestsRoute: AppRequestsRoute,

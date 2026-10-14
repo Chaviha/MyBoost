@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Boxes, Download, Ellipsis, FileSpreadsheet, FileUp, ImagePlus, Pencil, Share2, Trash2 } from "lucide-react";
+import { Boxes, Download, Ellipsis, FileSpreadsheet, FileUp, ImagePlus, Package, Pencil, Share2, Table2, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
@@ -8,6 +8,7 @@ import { CatalogueSubnav } from "@/components/catalogue-subnav";
 import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
 import { ListingCover } from "@/components/listing-cover";
+import { ItemListBuilder } from "@/components/item-list-builder";
 import { MediaManagerDialog } from "@/components/media-manager";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
     businessSpecDefs,
     businessVariants,
     addProduct,
+    createItemList,
     importProducts,
     can,
     updateProduct,
@@ -70,7 +72,10 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
     removeProductMedia,
     reorderProductMedia,
   } = useLife();
+  const [chooserOpen, setChooserOpen] = useState(false);
   const [open, setOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const [familyFilter, setFamilyFilter] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [tableCategoryId, setTableCategoryId] = useState("");
   const [mediaForId, setMediaForId] = useState<string | null>(null);
@@ -85,13 +90,6 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
   );
 
 
-  if (!can("view_products")) {
-    return <AccessDenied need="Product catalogues are for business owners." />;
-  }
-  if (!selectedBusiness) {
-    return <EmptyState icon={Boxes} text="Add a business first." />;
-  }
-
   const activeCategoryId = tableCategoryId || businessCategories[0]?.category_id || "";
 
   const columnDefs = useMemo(() => {
@@ -103,10 +101,20 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
   }, [businessSpecDefs, activeCategoryId]);
 
   const tableRows = useMemo(() => {
-    if (activeCategoryId) {
-      return catalogueItems.filter((p) => p.category_id === activeCategoryId);
+    const inCategory = activeCategoryId
+      ? catalogueItems.filter((p) => p.category_id === activeCategoryId)
+      : catalogueItems;
+    const filtered = familyFilter ? inCategory.filter((p) => (p.family || "") === familyFilter) : inCategory;
+    // Keep each family's rows together (stable sort, so entry order is kept within a family).
+    return filtered.slice().sort((a, b) => (a.family || "\uffff").localeCompare(b.family || "\uffff"));
+  }, [catalogueItems, activeCategoryId, familyFilter]);
+
+  const categoryFamilies = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of catalogueItems) {
+      if (p.family && (!activeCategoryId || p.category_id === activeCategoryId)) set.add(p.family);
     }
-    return catalogueItems;
+    return [...set].sort();
   }, [catalogueItems, activeCategoryId]);
 
   const specsByCategory = useMemo(() => {
@@ -125,6 +133,13 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
     return map;
   }, [businessSpecDefs]);
 
+  if (!can("view_products")) {
+    return <AccessDenied need="Product catalogues are for business owners." />;
+  }
+  if (!selectedBusiness) {
+    return <EmptyState icon={Boxes} text="Add a business first." />;
+  }
+
   const categoryLabel =
     businessCategories.find((c) => c.category_id === activeCategoryId)?.name || "All products";
 
@@ -140,7 +155,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
             : `Product items for ${selectedBusiness.business_name}: specifications, optional options, pricing, optional stock.`
         }
         actionLabel={isService ? "Add service" : "Add product"}
-        onAction={() => setOpen(true)}
+        onAction={() => setChooserOpen(true)}
       />
       <CatalogueSubnav />
 
@@ -254,7 +269,10 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
           <Select
             className="max-w-xs"
             value={activeCategoryId}
-            onChange={(e) => setTableCategoryId(e.target.value)}
+            onChange={(e) => {
+              setTableCategoryId(e.target.value);
+              setFamilyFilter("");
+            }}
           >
             {businessCategories.map((c) => (
               <option key={c.category_id} value={c.category_id}>
@@ -263,6 +281,20 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
             ))}
             <option value="">All (card view)</option>
           </Select>
+          {categoryFamilies.length > 0 ? (
+            <Select
+              className="max-w-xs"
+              value={familyFilter}
+              onChange={(e) => setFamilyFilter(e.target.value)}
+            >
+              <option value="">All families</option>
+              {categoryFamilies.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </Select>
+          ) : null}
           <Badge tone="neutral">{columnDefs.length} data columns</Badge>
         </div>
       ) : null}
@@ -283,6 +315,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
               <thead className="bg-canvas text-xs tracking-wide text-ink-muted uppercase">
                 <tr>
                   <th className="px-3 py-2.5 font-medium">Design</th>
+                  <th className="px-3 py-2.5 font-medium">Family</th>
                   <th className="px-3 py-2.5 font-medium">Name</th>
                   <th className="px-3 py-2.5 font-medium">SKU</th>
                   {columnDefs.map((d) => (
@@ -302,7 +335,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                 {tableRows.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={6 + columnDefs.length}
+                      colSpan={7 + columnDefs.length}
                       className="px-3 py-8 text-center text-ink-muted"
                     >
                       
@@ -331,6 +364,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                             )}
                           </button>
                         </td>
+                        <td className="px-3 py-2.5 text-ink-muted">{p.family || "-"}</td>
                         <td className="px-3 py-2.5 font-medium">
                           {p.name}
                           {variantCount > 0 ? (
@@ -436,6 +470,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h3 className="font-display text-xl font-medium tracking-tight">{p.name}</h3>
+                      {p.family ? <p className="mt-0.5 text-xs text-ink-muted">Family: {p.family}</p> : null}
                       {p.sku ? <p className="mt-0.5 text-xs text-ink-muted">SKU: {p.sku}</p> : null}
                     </div>
                     {variantCount > 0 ? <Badge tone="neutral">{variantCount} variants</Badge> : null}
@@ -499,6 +534,76 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
           })}
         </div>
       )}
+
+      <Dialog open={chooserOpen} onOpenChange={(v) => !v && setChooserOpen(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{isService ? "Add service" : "Add product"}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <button
+              type="button"
+              className="flex items-start gap-3 rounded-lg border border-line bg-canvas p-4 text-left transition hover:border-forest/50 hover:bg-paper"
+              onClick={() => {
+                setChooserOpen(false);
+                setOpen(true);
+              }}
+            >
+              <Package className="mt-0.5 size-5 shrink-0 text-forest" />
+              <span>
+                <span className="block font-medium">Add item</span>
+                <span className="block text-sm text-ink-muted">
+                  One {isService ? "service" : "product"} with its details, specifications and price.
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="flex items-start gap-3 rounded-lg border border-line bg-canvas p-4 text-left transition hover:border-forest/50 hover:bg-paper"
+              onClick={() => {
+                setChooserOpen(false);
+                setListOpen(true);
+              }}
+            >
+              <Table2 className="mt-0.5 size-5 shrink-0 text-forest" />
+              <span>
+                <span className="block font-medium">Add item list</span>
+                <span className="block text-sm text-ink-muted">
+                  Build a table of many items at once: pick a category, group them by family and fill in specification columns.
+                </span>
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={listOpen} onOpenChange={(v) => !v && setListOpen(false)}>
+        <DialogContent className="w-[min(calc(100%-2rem),76rem)] max-h-[92dvh]">
+          <DialogHeader>
+            <DialogTitle>{isService ? "Add service list" : "Add item list"}</DialogTitle>
+          </DialogHeader>
+          {listOpen ? (
+            <ItemListBuilder
+              categories={businessCategories}
+              specDefs={businessSpecDefs}
+              existingFamilies={catalogueItems
+                .filter((p) => p.family)
+                .map((p) => ({ category_id: p.category_id || "", family: p.family as string }))}
+              itemKind={itemKind}
+              defaultCategoryId={activeCategoryId}
+              onCancel={() => setListOpen(false)}
+              onSubmit={(form) => {
+                const n = createItemList({ ...form, itemKind });
+                if (!n) return;
+                toast.success(`${n} ${isService ? "service" : "item"}${n === 1 ? "" : "s"} added.`);
+                setTableCategoryId("");
+                setFamilyFilter("");
+                setListOpen(false);
+              }}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={open} onOpenChange={(v) => !v && setOpen(false)}>
         <DialogContent>
@@ -690,6 +795,7 @@ function ProductForm({
     sku: string;
     description: string;
     specs: SpecValues;
+    family: string;
   }) => void;
 }) {
   const [categoryId, setCategoryId] = useState(defaultCategoryId || "");
@@ -702,6 +808,7 @@ function ProductForm({
     stock: "",
     sku: "",
     description: "",
+    family: "",
   });
   const [specs, setSpecs] = useState<SpecValues>({});
   const defs = categoryId ? specsByCategory.get(categoryId) || [] : [];
@@ -760,6 +867,13 @@ function ProductForm({
             placeholder="Create a category with a table style first"
           />
         )}
+      </Field>
+      <Field label="Family" hint="(optional, groups sizes/grades in the table)">
+        <Input
+          value={form.family}
+          onChange={(e) => setForm({ ...form, family: e.target.value })}
+          placeholder="e.g. CHS pipe"
+        />
       </Field>
       <Field label="SKU" hint="(optional)">
         <Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />

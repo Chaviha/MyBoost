@@ -6,39 +6,44 @@
   --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
   --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
 
-  --color-canvas: #f3eee4;
+  --color-canvas: #f1ece2;
   --color-paper: #faf7f0;
   --color-paper-2: #fffdf8;
-  --color-ink: #1c1915;
-  --color-ink-soft: #3f3a33;
-  --color-ink-muted: #6f675c;
-  --color-ink-faint: #9a9286;
-  --color-line: #e2dacb;
-  --color-line-strong: #cfc4b0;
-  --color-forest: #2c5a42;
-  --color-forest-fg: #f6f1e8;
-  --color-moss: #3f6e52;
-  --color-leaf: #e4eee4;
-  --color-clay: #8f4e38;
-  --color-amber: #8a5a1a;
-  --color-amber-bg: #f3ead6;
-  --color-danger-bg: #f3e4dc;
+  --color-ink: #1a1714;
+  --color-ink-soft: #3a352e;
+  --color-ink-muted: #6a6358;
+  --color-ink-faint: #968e82;
+  --color-line: #e0d8c8;
+  --color-line-strong: #c9beaa;
+  --color-forest: #27553e;
+  --color-forest-fg: #f7f3eb;
+  --color-moss: #3a6a4e;
+  --color-leaf: #e2ede3;
+  --color-clay: #8a4a35;
+  --color-amber: #85561a;
+  --color-amber-bg: #f2e9d4;
+  --color-danger-bg: #f2e3db;
+  --color-surface-muted: #f0ebe3;
 
   --radius-xs: 4px;
   --radius-sm: 8px;
   --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 28px;
-  --radius-2xl: 36px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
 
   --shadow-border:
-    0px 0px 0px 1px rgba(28, 25, 21, 0.07),
-    0px 1px 2px -1px rgba(28, 25, 21, 0.06),
-    0px 2px 6px 0px rgba(28, 25, 21, 0.04);
+    0px 0px 0px 1px rgba(26, 23, 20, 0.06),
+    0px 1px 2px -1px rgba(26, 23, 20, 0.05),
+    0px 2px 8px 0px rgba(26, 23, 20, 0.04);
   --shadow-border-hover:
-    0px 0px 0px 1px rgba(28, 25, 21, 0.1),
-    0px 1px 2px -1px rgba(28, 25, 21, 0.08),
-    0px 4px 10px 0px rgba(28, 25, 21, 0.06);
+    0px 0px 0px 1px rgba(26, 23, 20, 0.09),
+    0px 2px 4px -1px rgba(26, 23, 20, 0.07),
+    0px 6px 16px 0px rgba(26, 23, 20, 0.06);
+  --shadow-elevated:
+    0px 0px 0px 1px rgba(26, 23, 20, 0.05),
+    0px 4px 12px -2px rgba(26, 23, 20, 0.08),
+    0px 12px 28px -4px rgba(26, 23, 20, 0.06);
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -80,6 +85,30 @@
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
+  }
+
+  /* Smoother selection */
+  ::selection {
+    background: color-mix(in srgb, var(--color-forest) 18%, transparent);
+    color: var(--color-ink);
+  }
+}
+
+@layer components {
+  /* Subtle page enter for main content areas */
+  .page-enter {
+    animation: page-fade var(--motion-fast) var(--ease-smooth-out) both;
+  }
+
+  @keyframes page-fade {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }
 

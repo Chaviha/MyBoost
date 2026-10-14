@@ -6,12 +6,17 @@ import {
   Pencil,
   Printer,
   Search,
+<<<<<<< HEAD
+=======
+  Sparkles,
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
   Store,
   Trash2,
   Upload,
   XCircle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
 import { downloadQuoteHtml, printQuotePdf } from "@/lib/quote-export";
@@ -82,7 +87,11 @@ export const Route = createFileRoute("/_app/quotations")({
 function statusTone(status: string): "forest" | "amber" | "neutral" | "red" {
   if (status === "Accepted") return "forest";
   if (status === "Rejected") return "red";
+<<<<<<< HEAD
   if (status === "Sent") return "amber";
+=======
+  if (["Sent", "Received", "Changes requested"].includes(status)) return "amber";
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
   return "neutral";
 }
 
@@ -95,14 +104,42 @@ function QuotationsPage() {
     updateQuotation,
     acceptQuotation,
     rejectQuotation,
+<<<<<<< HEAD
     ensureQuoteShareToken,
     can,
+=======
+    requestQuotationChanges,
+    markQuotationReviewed,
+    ensureQuoteShareToken,
+    can,
+    currentUser,
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
   } = useLife();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Quotation | null>(null);
   const [reviewing, setReviewing] = useState<Quotation | null>(null);
   const [search, setSearch] = useState("");
+<<<<<<< HEAD
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+=======
+  const [quoteTab, setQuoteTab] = useState("all");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [showAiAssist, setShowAiAssist] = useState(false);
+  const [aiRequest, setAiRequest] = useState("");
+  const [aiDetails, setAiDetails] = useState("");
+  const [aiFiles, setAiFiles] = useState<File[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState("");
+
+  function resetAi() {
+    setShowAiAssist(false);
+    setAiRequest("");
+    setAiDetails("");
+    setAiFiles([]);
+    setAiResult("");
+    setAiLoading(false);
+  }
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 
   const qSearch = search.trim().toLowerCase();
   // User-controlled date order
@@ -117,9 +154,22 @@ function QuotationsPage() {
     [businessQuotes, sortDir],
   );
 
+<<<<<<< HEAD
   const filteredQuotes = useMemo(() => {
     if (!qSearch) return sortedQuotes;
     return sortedQuotes.filter((q) => {
+=======
+  const tabbedQuotes = useMemo(() => sortedQuotes.filter((q) => {
+    if (quoteTab === "sent") return ["Sent", "Draft", "Changes requested", "Reviewed"].includes(q.status);
+    if (quoteTab === "received") return q.status === "Received";
+    if (quoteTab === "accepted") return q.status === "Accepted";
+    return true;
+  }), [sortedQuotes, quoteTab]);
+
+  const filteredQuotes = useMemo(() => {
+    if (!qSearch) return tabbedQuotes;
+    return tabbedQuotes.filter((q) => {
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
       const hay = [
         q.customer_name,
         q.notes,
@@ -135,7 +185,11 @@ function QuotationsPage() {
         .toLowerCase();
       return hay.includes(qSearch);
     });
+<<<<<<< HEAD
   }, [sortedQuotes, qSearch]);
+=======
+  }, [tabbedQuotes, qSearch]);
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 
   if (!can("manage_quotes")) {
     return <AccessDenied need="Quotations are for business owners." />;
@@ -228,11 +282,30 @@ function QuotationsPage() {
         actionLabel="New quotation"
         onAction={() => {
           setEditing(null);
+<<<<<<< HEAD
+=======
+          resetAi();
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
           setOpen(true);
         }}
       />
 
+<<<<<<< HEAD
       <div className="mb-4 flex flex-wrap items-center gap-2">
+=======
+      <div className="mb-4 overflow-x-auto">
+        <Tabs value={quoteTab} onValueChange={setQuoteTab}>
+          <TabsList className="w-max">
+            <TabsTrigger value="all">All quotations</TabsTrigger>
+            <TabsTrigger value="sent">Quotation Sent</TabsTrigger>
+            <TabsTrigger value="received">Quotation Received</TabsTrigger>
+            <TabsTrigger value="accepted">Accepted</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-faint" />
           <Input
@@ -262,7 +335,11 @@ function QuotationsPage() {
       {businessQuotes.length === 0 ? (
         <EmptyState icon={ListChecks} text="No quotations yet." />
       ) : filteredQuotes.length === 0 ? (
+<<<<<<< HEAD
         <EmptyState icon={Search} text={`No quotations match “${search.trim()}”.`} />
+=======
+        <EmptyState icon={Search} text={quoteTab === "received" ? "No quotations received in this workspace yet." : `No quotations match “${search.trim()}”.`} />
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
       ) : (
         <div className="flex flex-col gap-3">
           {filteredQuotes.map((q) => {
@@ -314,6 +391,30 @@ function QuotationsPage() {
                             },
                           ]
                         : []),
+<<<<<<< HEAD
+=======
+                      ...(q.status === "Received" ? [
+                        {
+                          label: "Acknowledge receipt",
+                          icon: <CheckCircle2 className="size-4" />,
+                          onSelect: () => { markQuotationReviewed(q.quote_id); toast.success("Receipt acknowledged."); },
+                        },
+                        {
+                          label: "Request changes",
+                          icon: <Pencil className="size-4" />,
+                          onSelect: () => {
+                            const message = window.prompt("What changes are needed? Include requested price, quantities, specifications or delivery changes.");
+                            if (message?.trim()) { requestQuotationChanges(q.quote_id, message.trim()); toast.success("Change request recorded."); }
+                          },
+                        },
+                        {
+                          label: "Reject quotation",
+                          icon: <XCircle className="size-4" />,
+                          destructive: true,
+                          onSelect: () => { rejectQuotation(q.quote_id); toast.message("Quotation rejected — no charge posted."); },
+                        },
+                      ] : []),
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
                       {
                         label: "Send WhatsApp",
                         onSelect: () => shareWhatsApp(q),
@@ -452,6 +553,10 @@ function QuotationsPage() {
           if (!v) {
             setOpen(false);
             setEditing(null);
+<<<<<<< HEAD
+=======
+            resetAi();
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
           }
         }}
       >
@@ -459,6 +564,159 @@ function QuotationsPage() {
           <DialogHeader>
             <DialogTitle>{editing ? "Edit quotation" : "New quotation"}</DialogTitle>
           </DialogHeader>
+
+          {!editing && (
+            <div className="mb-4">
+              {!showAiAssist ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full justify-start gap-2 border border-line bg-leaf/40 text-forest hover:bg-leaf"
+                  onClick={() => setShowAiAssist(true)}
+                >
+                  <Sparkles className="size-4" />
+                  AI quotation assistant
+                </Button>
+              ) : (
+                <div className="rounded-xl border border-line bg-leaf/30 p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="rounded-lg bg-forest/10 p-2 text-forest">
+                        <Sparkles className="size-4" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-ink">AI quotation assistant</p>
+                        <p className="text-xs text-ink-muted">
+                          Describe the job; attach sketches if helpful. Missing measurements are flagged, not invented.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => resetAi()}
+                    >
+                      Close
+                    </Button>
+                  </div>
+                  <Textarea
+                    value={aiRequest}
+                    onChange={(e) => setAiRequest(e.target.value)}
+                    rows={3}
+                    placeholder="e.g. Quote for a mild-steel tripod stand, 1.5 m high, three adjustable legs and a mounting plate…"
+                  />
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-ink-soft">
+                      Sketches, photos or drawings (optional)
+                    </label>
+                    <Input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,application/pdf,.dxf,.dwg"
+                      multiple
+                      onChange={(e) => setAiFiles(Array.from(e.target.files || []).slice(0, 5))}
+                    />
+                    {aiFiles.length > 0 && (
+                      <p className="mt-1 text-xs text-ink-muted">
+                        {aiFiles.map((f) => f.name).join(" · ")} — up to 5 files, 8 MB each.
+                      </p>
+                    )}
+                  </div>
+                  <Textarea
+                    value={aiDetails}
+                    onChange={(e) => setAiDetails(e.target.value)}
+                    rows={2}
+                    placeholder="Optional: quantity, material grade, finish, location, deadline…"
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      disabled={aiLoading || !aiRequest.trim()}
+                      onClick={async () => {
+                        setAiLoading(true);
+                        setAiResult("");
+                        try {
+                          const attachments = await Promise.all(
+                            aiFiles.map(async (file) => {
+                              if (file.size > 8 * 1024 * 1024)
+                                throw new Error(`${file.name} exceeds 8 MB.`);
+                              const data = await new Promise<string>((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve(String(reader.result || ""));
+                                reader.onerror = () =>
+                                  reject(new Error(`Could not read ${file.name}`));
+                                reader.readAsDataURL(file);
+                              });
+                              return {
+                                name: file.name,
+                                type: file.type || "application/octet-stream",
+                                data,
+                              };
+                            }),
+                          );
+                          const response = await fetch("/api/ai/quote-assist", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              request: aiRequest,
+                              details: aiDetails,
+                              attachments,
+                            }),
+                          });
+                          const data = await response.json();
+                          if (!response.ok)
+                            throw new Error(data.error || "AI assistant request failed.");
+                          setAiResult(data.answer || "No response received.");
+                        } catch (error) {
+                          toast.error(
+                            error instanceof Error
+                              ? error.message
+                              : "Could not contact AI assistant.",
+                          );
+                        } finally {
+                          setAiLoading(false);
+                        }
+                      }}
+                    >
+                      {aiLoading ? (
+                        "Preparing brief…"
+                      ) : (
+                        <>
+                          <Sparkles className="size-4" />
+                          Ask AI assistant
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setAiRequest("");
+                        setAiDetails("");
+                        setAiFiles([]);
+                        setAiResult("");
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                  {aiResult && (
+                    <div className="whitespace-pre-wrap rounded-lg border border-line bg-paper p-3 text-sm">
+                      <p className="mb-2 font-semibold text-ink">AI fabrication brief</p>
+                      {aiResult}
+                      <p className="mt-3 text-xs text-ink-muted">
+                        Review measurements, catalogue rates and assumptions before creating or
+                        sending a quotation. This has not priced or saved a quote.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <QuoteWizard
             key={editing?.quote_id || "new"}
             customers={businessCustomers}
@@ -477,6 +735,10 @@ function QuotationsPage() {
             onCancel={() => {
               setOpen(false);
               setEditing(null);
+<<<<<<< HEAD
+=======
+              resetAi();
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
             }}
             onSubmit={(form) => {
               if (editing) {
@@ -487,11 +749,33 @@ function QuotationsPage() {
                     : "Quotation updated.",
                 );
               } else {
+<<<<<<< HEAD
                 addQuotation(form);
                 toast.success("Quotation sent — review & accept to charge the customer.");
               }
               setOpen(false);
               setEditing(null);
+=======
+                const cust = businessCustomers.find((c) => c.customer_id === form.customerId);
+                if (!cust) {
+                  toast.error("Select a customer before sending.");
+                  return;
+                }
+                if (cust.user_id && cust.user_id === currentUser?.user_id) {
+                  toast.error("Cannot send a quotation to your own account.");
+                  return;
+                }
+                addQuotation(form);
+                toast.success(
+                  cust.user_id
+                    ? `Quotation sent to ${cust.name} — it will appear in their LifeBoost account.`
+                    : `Quotation saved for ${cust.name} — share the review link, WhatsApp, or email.`,
+                );
+              }
+              setOpen(false);
+              setEditing(null);
+              resetAi();
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
             }}
           />
         </DialogContent>
@@ -515,12 +799,16 @@ function QuoteWizard({
   onSubmit,
   initial,
 }: {
-  customers: { customer_id: string; name: string }[];
+  customers: { customer_id: string; name: string; email?: string; phone?: string; user_id?: string }[];
   onCancel: () => void;
   onSubmit: (form: WizardForm) => void;
   initial?: WizardForm;
 }) {
+<<<<<<< HEAD
   const { publicMarketplace, selectedBusiness, businessProducts, businessServices } = useLife();
+=======
+  const { publicMarketplace, selectedBusiness, businessProducts, businessServices, currentUser } = useLife();
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
   const [quoteType, setQuoteType] = useState<QuoteType | null>(initial?.quoteType ?? null);
   const [customerId, setCustomerId] = useState(initial?.customerId ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
@@ -613,6 +901,11 @@ function QuoteWizard({
 
   function handleSubmit() {
     if (!customerId) return toast.error("Select a customer.");
+    const selected = customers.find((c) => c.customer_id === customerId);
+    if (!selected) return toast.error("Select a valid customer.");
+    if (selected.user_id && selected.user_id === currentUser.user_id) {
+      return toast.error("You cannot send a quotation to your own account. Choose a different customer.");
+    }
     if (quoteType === "general") {
       if (!generalTotal) return toast.error("Enter a total.");
       onSubmit({ customerId, total: generalTotal, notes, quoteType: "general" });
@@ -664,13 +957,26 @@ function QuoteWizard({
 
       <Field label="Customer">
         <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-          <option value="">Select…</option>
-          {customers.map((c) => (
-            <option key={c.customer_id} value={c.customer_id}>
-              {c.name}
-            </option>
-          ))}
+          <option value="">Select customer…</option>
+          {customers
+            .filter((c) => !c.user_id || c.user_id !== currentUser.user_id)
+            .map((c) => (
+              <option key={c.customer_id} value={c.customer_id}>
+                {c.name}
+                {c.email ? ` · ${c.email}` : ""}
+                {c.user_id ? " · LifeBoost" : ""}
+              </option>
+            ))}
         </Select>
+        {customerId ? (
+          <p className="mt-1 text-xs text-ink-muted">
+            Quote will be sent to this customer
+            {customers.find((c) => c.customer_id === customerId)?.user_id
+              ? " (appears in their LifeBoost account)"
+              : " (share link / WhatsApp / email — no LifeBoost account linked yet)"}
+            .
+          </p>
+        ) : null}
       </Field>
 
       {quoteType === "general" ? (

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ClipboardList, ShoppingCart } from "lucide-react";
+import { ClipboardList, ListChecks, ShoppingCart } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
@@ -13,11 +13,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDateTime, money } from "@/lib/format";
 import { chargeModeLabel } from "@/lib/roles";
 import { useLife } from "@/lib/store";
-import type { Customer } from "@/lib/types";
+import type { Customer, Quotation } from "@/lib/types";
 
 export const Route = createFileRoute("/_app/tab")({
   component: TabPage,
 });
+
+function quoteTone(status: string): "forest" | "amber" | "neutral" | "red" {
+  if (status === "Accepted") return "forest";
+  if (status === "Rejected") return "red";
+  if (status === "Sent" || status === "Pending" || status === "Open") return "amber";
+  return "neutral";
+}
 
 function TabPage() {
   const {
@@ -31,9 +38,13 @@ function TabPage() {
     workspace,
     myCustomerJobs,
     myCustomerSales,
+    myCustomerQuotes,
+    acceptQuotation,
+    rejectQuotation,
   } = useLife();
   const [chargeFor, setChargeFor] = useState<Customer | null>(null);
   const [payFor, setPayFor] = useState<Customer | null>(null);
+  const [busyQuote, setBusyQuote] = useState<string | null>(null);
 
   const productsFor = (customer: Customer) =>
     state.products.filter((p) => p.business_id === customer.business_id && p.status === "active");
@@ -41,12 +52,39 @@ function TabPage() {
   const shopName = (id: string) =>
     state.businesses.find((b) => b.business_id === id)?.business_name ?? "Business";
 
+  async function respondQuote(q: Quotation, decision: "accept" | "reject") {
+    setBusyQuote(q.quote_id);
+    try {
+      if (q.share_token) {
+        const res = await fetch(`/api/public/quote/${encodeURIComponent(q.share_token)}/respond`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Could not update quotation.");
+      }
+      // Keep local copy in sync for notifications / list.
+      if (decision === "accept") acceptQuotation(q.quote_id);
+      else rejectQuotation(q.quote_id);
+      toast.success(decision === "accept" ? "Quotation accepted." : "Quotation declined.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not update quotation.");
+    } finally {
+      setBusyQuote(null);
+    }
+  }
+
+  const openQuotes = (myCustomerQuotes || []).filter(
+    (q) => q.status === "Sent" || q.status === "Pending" || q.status === "Open" || q.status === "Received",
+  );
+
   return (
     <>
       <PageHeader
         eyebrow={workspace === "customer" ? "Your shops" : "Tabs"}
         title="My tab"
-        subtitle="Orders, jobs and payments at the shops that added you as a customer."
+        subtitle="Orders, quotations, jobs and payments at the shops that added you as a customer."
       />
       {myTabs.length === 0 ? (
         <EmptyState
@@ -54,12 +92,73 @@ function TabPage() {
           text="You are not a customer at any business yet. An owner can add you and allow you to post charges."
         />
       ) : (
-        <Tabs defaultValue="payments">
-          <TabsList className="grid w-full grid-cols-3">
+        <Tabs defaultValue={openQuotes.length ? "quotes" : "payments"}>
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="quotes">
+              Quotes{openQuotes.length ? ` (${openQuotes.length})` : ""}
+            </TabsTrigger>
             <TabsTrigger value="orders">Orders</TabsTrigger>
             <TabsTrigger value="jobs">Jobs</TabsTrigger>
             <TabsTrigger value="payments">Payments</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="quotes">
+            {(myCustomerQuotes || []).length === 0 ? (
+              <EmptyState
+                icon={ListChecks}
+                text="No quotations received yet. When a business sends you a quote, it appears here."
+                compact
+              />
+            ) : (
+              <div className="flex flex-col gap-3">
+                {(myCustomerQuotes || []).map((q) => {
+                  const open =
+                    q.status === "Sent" ||
+                    q.status === "Pending" ||
+                    q.status === "Open" ||
+                    q.status === "Received";
+                  return (
+                    <Card key={q.quote_id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium tracking-wide text-forest uppercase">
+                          {shopName(q.business_id)}
+                        </p>
+                        <p className="mt-0.5 font-medium text-ink">
+                          Quotation · {money(q.total)}
+                        </p>
+                        <p className="text-xs text-ink-muted">
+                          {formatDateTime(q.date)}
+                          {q.notes ? ` · ${q.notes.slice(0, 80)}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone={quoteTone(q.status)}>{q.status}</Badge>
+                        {open ? (
+                          <>
+                            <Button
+                              size="sm"
+                              disabled={busyQuote === q.quote_id}
+                              onClick={() => void respondQuote(q, "accept")}
+                            >
+                              Accept
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={busyQuote === q.quote_id}
+                              onClick={() => void respondQuote(q, "reject")}
+                            >
+                              Decline
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </TabsContent>
 
           <TabsContent value="orders">
             {myCustomerSales.length === 0 ? (
@@ -164,20 +263,22 @@ function TabPage() {
       <ChargeDialog
         customer={chargeFor}
         products={chargeFor ? productsFor(chargeFor) : []}
-        open={Boolean(chargeFor)}
         onClose={() => setChargeFor(null)}
-        onSubmit={(form) => {
-          addCustomerCharge(form);
-          toast.success("Added to your tab.");
+        onSubmit={(payload) => {
+          if (!chargeFor) return;
+          addCustomerCharge(chargeFor.customer_id, payload);
+          toast.success("Charge added to your tab.");
+          setChargeFor(null);
         }}
       />
       <PaymentDialog
         customer={payFor}
-        open={Boolean(payFor)}
         onClose={() => setPayFor(null)}
-        onSubmit={(form) => {
-          recordCustomerPayment(form);
-          toast.success("Payment noted.");
+        onSubmit={(amount, note) => {
+          if (!payFor) return;
+          recordCustomerPayment(payFor.customer_id, amount, note);
+          toast.success("Payment recorded.");
+          setPayFor(null);
         }}
       />
     </>

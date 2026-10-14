@@ -51,8 +51,6 @@ function CategoriesPage() {
     return <EmptyState icon={Tags} text="Add a business first." />;
   }
 
-  const suggested = templatesForBusinessType(selectedBusiness.business_type);
-
   return (
     <>
       <Toolbar
@@ -62,6 +60,7 @@ function CategoriesPage() {
         onAction={() => setOpen(true)}
       />
       <CatalogueSubnav />
+<<<<<<< HEAD
 
       <Card className="mb-4 p-4 text-sm text-ink-muted">
         <p className="font-medium text-ink">Table styles for this business type ({selectedBusiness.business_type})</p>
@@ -73,6 +72,8 @@ function CategoriesPage() {
             .join(" · ") || "Blank + any industry template"}
         </p>
       </Card>
+=======
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 
       {businessCategories.length === 0 ? (
         <EmptyState

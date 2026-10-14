@@ -24,10 +24,13 @@ function AuthenticatedLayout() {
   if (authLoading) return <div className="min-h-dvh bg-canvas" />;
 
   if (!authenticated) {
-    const publicPath = pathname === "/" || pathname === "/marketplace";
+    // Landing is the home/auth experience. Marketplace stays public at /marketplace only.
     const params = new URLSearchParams(search || "");
-    const wantsAuth = params.get("auth") === "login" || params.get("auth") === "register" || params.get("auth") === "forgot";
-    if (publicPath && !wantsAuth) return <PublicMarketplace />;
+    const wantsAuth =
+      params.get("auth") === "login" ||
+      params.get("auth") === "register" ||
+      params.get("auth") === "forgot";
+    if (pathname === "/marketplace" && !wantsAuth) return <PublicMarketplace />;
     return <AuthScreen />;
   }
 

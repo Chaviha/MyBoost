@@ -33,7 +33,8 @@ export function DialogContent({
       <DialogPrimitive.Content
         className={cn(
           "fixed top-1/2 left-1/2 z-50 flex w-[min(calc(100%-2rem),28rem)] max-h-[min(90dvh,40rem)] -translate-x-1/2 -translate-y-1/2 flex-col",
-          "rounded-xl bg-paper text-ink shadow-border",
+          "rounded-xl bg-paper text-ink shadow-elevated",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95",
           className,
         )}
         {...props}

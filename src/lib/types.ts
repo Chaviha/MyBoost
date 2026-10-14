@@ -8,6 +8,68 @@ export type CustomerStatus = "Pending" | "Due soon" | "Overdue" | "Paid";
 
 export type ChargeMode = "owner" | "customer" | "both";
 
+export type PricingMethod =
+  | "manual"
+  | "reference_factor"
+  | "cost_markup"
+  | "per_weight"
+  | "per_length"
+  | "per_area"
+  | "formula";
+
+export type PriceHistory = {
+  price_history_id: string;
+  business_id: string;
+  product_id: string;
+  old_price: number;
+  new_price: number;
+  unit: string;
+  changed_by: string;
+  reason: string;
+  effective_from: string;
+  created_at: string;
+};
+
+export type LabourRate = {
+  labour_rate_id: string;
+  business_id: string;
+  profession: string;
+  rate: number;
+  rate_unit: "hour" | "day";
+  workers_default: number;
+  active: boolean;
+};
+
+export type TransportRate = {
+  transport_rate_id: string;
+  business_id: string;
+  vehicle: string;
+  rate_per_km: number;
+  capacity_tonnes: number;
+  active: boolean;
+};
+
+export type PricingSettings = {
+  business_id: string;
+  default_markup_percent: number;
+  default_waste_percent: number;
+  overhead_percent: number;
+  default_profit_margin_percent: number;
+  require_quote_approval: boolean;
+};
+
+export type JobResourceUsage = {
+  resource_id: string;
+  product_id?: string;
+  description: string;
+  qty: number;
+  unit: string;
+  rate: number;
+  amount: number;
+  source: "catalogue" | "manual";
+};
+
+
 export type LedgerType = "charge" | "payment";
 
 export type JobStatus = "Not started" | "In progress" | "On hold" | "Ready" | "Completed";
@@ -218,6 +280,8 @@ export type Product = {
   category: string;
   /** Links to ProductCategory when using structured catalogue. */
   category_id?: string;
+  /** Product family inside a category, e.g. "CHS pipe" or "Equal angle". Groups sizes/grades together. */
+  family?: string;
   unit: string;
   selling_price: number;
   cost_price: number;
@@ -231,6 +295,13 @@ export type Product = {
   image_url?: string;
   /** Design drawings, photos, and short videos. */
   gallery?: MediaItem[];
+  /** Smart pricing configuration. selling_price remains the current effective price. */
+  pricing_method?: PricingMethod;
+  price_factor?: number;
+  reference_product_id?: string;
+  price_override?: number;
+  pricing_unit?: string;
+  last_price_changed_at?: string;
   /** when true, this product is offered up across LifeBoost for anyone building a
    * quotation — any sector, not just this product's own business — via the public
    * marketplace endpoint. */
@@ -273,12 +344,17 @@ export type Job = {
   business_id: string;
   employee_id: string;
   customer_id: string;
+  quotation_id?: string;
   title: string;
   description: string;
   start_date: string;
   due_date: string;
   estimated_cost: number;
   status: JobStatus;
+  planned_resources?: JobResourceUsage[];
+  actual_resources?: JobResourceUsage[];
+  variance_reason?: string;
+  completed_at?: string;
 };
 
 export type QuoteType = "general" | "steel" | "dxf_cut" | "concrete" | "custom_product";
@@ -319,6 +395,20 @@ export type Quotation = {
   line_items?: QuoteLineItem[];
   /** Public review link token (customer opens /quote/<token> without login) */
   share_token?: string;
+<<<<<<< HEAD
+=======
+  calculation?: {
+    material_cost: number;
+    labour_cost: number;
+    transport_cost: number;
+    finishing_cost: number;
+    other_cost: number;
+    overhead_cost: number;
+    profit: number;
+    margin_percent: number;
+    waste_percent: number;
+  };
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 };
 
 export type Invoice = {
@@ -391,6 +481,10 @@ export type LifeState = {
   saccos: Sacco[];
   offers: Offer[];
   liabilities: Record<string, number>;
+  price_history: PriceHistory[];
+  labour_rates: LabourRate[];
+  transport_rates: TransportRate[];
+  pricing_settings: PricingSettings[];
 };
 
 export type EnrichedBusiness = Business & {

@@ -59,3 +59,12 @@ npm run dev
 ```
 
 Keep both the Vite client and the LifeBoost API running. If the API is stopped or cannot connect to PostgreSQL, the public Marketplace will show a connection error instead of incorrectly reporting zero listings.
+
+
+## Cloudflare R2 object storage (optional)
+
+LifeBoost can store new business, asset, product-gallery and avatar uploads in Cloudflare R2 instead of the server's local `uploads` directory. Set all five `R2_*` variables from `.env.example` on the backend deployment. `R2_PUBLIC_URL` must be the public custom domain (or public bucket URL) for the bucket, without a trailing slash. Create an R2 S3 API token with read/write object permissions for the bucket. Keep the access key and secret only in the backend environment; never put them in `VITE_*` variables or frontend code.
+
+If any required R2 setting is missing, the app keeps using local storage for development. Existing `/uploads/...` files are not migrated automatically; copy them to the matching object keys in R2 before switching an existing production deployment, then update stored media URLs as needed. Configure CORS only if browser clients upload directly (this implementation uploads through the authenticated backend).
+
+Object key layout: `businesses/{businessId}/{filename}`, `assets/{assetId}/{filename}`, `products/{productId}/{filename}`, and `avatars/{userId}/{filename}`.

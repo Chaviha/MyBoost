@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, ClipboardCheck } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
@@ -25,9 +25,12 @@ export const Route = createFileRoute("/_app/jobs")({
 });
 
 function JobsPage() {
-  const { selectedBusiness, businessJobs, businessEmployees, addJob, updateJobStatus, can, state } =
-    useLife();
+  const {
+    selectedBusiness, businessJobs, businessEmployees, addJob, updateJobStatus,
+    recordJobActuals, can, state,
+  } = useLife();
   const [open, setOpen] = useState(false);
+  const [usageJobId, setUsageJobId] = useState<string | null>(null);
 
   if (!can("manage_jobs")) {
     return <AccessDenied need="Assigning jobs is for business owners. Professionals use My jobs." />;
@@ -50,30 +53,64 @@ function JobsPage() {
             const emp = businessEmployees.find((e) => e.employee_id === job.employee_id);
             const customer = state.customers.find((c) => c.customer_id === job.customer_id);
             return (
+              <div key={job.job_id} className="space-y-1">
               <JobCard
                 key={job.job_id}
                 job={job}
                 person={`${emp?.name ?? "Unassigned"}${customer ? ` · ${customer.name}` : ""}`}
-                overdue={+new Date(job.due_date) < +new Date("2026-08-31")}
+                overdue={+new Date(job.due_date) < +new Date()}
                 actions={
-                  <Select
-                    className="h-9 w-auto"
-                    value={job.status}
-                    onChange={(e) => {
-                      updateJobStatus(job.job_id, e.target.value as JobStatus);
-                      toast.success("Job status updated.");
-                    }}
-                  >
-                    {["Not started", "In progress", "On hold", "Ready", "Completed"].map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
-                  </Select>
+                  <div className="flex items-center gap-2">
+                    {(job.planned_resources?.length || job.actual_resources?.length) ? (
+                      <Button size="sm" variant="secondary" onClick={() => setUsageJobId(job.job_id)}>
+                        <ClipboardCheck className="size-3.5" /> Usage
+                      </Button>
+                    ) : null}
+                    <Select
+                      className="h-9 w-auto"
+                      value={job.status}
+                      onChange={(e) => {
+                        updateJobStatus(job.job_id, e.target.value as JobStatus);
+                        toast.success("Job status updated.");
+                      }}
+                    >
+                      {["Not started", "In progress", "On hold", "Ready", "Completed"].map((s) => (
+                        <option key={s}>{s}</option>
+                      ))}
+                    </Select>
+                  </div>
                 }
               />
+              {(job.actual_resources?.length || job.planned_resources?.length) ? (
+                <p className="px-2 text-xs text-ink-muted">
+                  Planned {job.planned_resources?.reduce((s, r) => s + Number(r.amount || 0), 0).toLocaleString()} ·
+                  Actual {job.actual_resources?.reduce((s, r) => s + Number(r.amount || 0), 0).toLocaleString()}
+                  {job.variance_reason ? ` · ${job.variance_reason}` : ""}
+                </p>
+              ) : null}
+              </div>
             );
           })}
         </div>
       )}
+      <Dialog open={Boolean(usageJobId)} onOpenChange={(v) => !v && setUsageJobId(null)}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Planned vs actual usage</DialogTitle></DialogHeader>
+          {(() => {
+            const job = businessJobs.find((j) => j.job_id === usageJobId);
+            if (!job) return null;
+            return <JobUsageForm
+              job={job}
+              onCancel={() => setUsageJobId(null)}
+              onSave={(resources, reason) => {
+                recordJobActuals(job.job_id, resources, reason);
+                toast.success("Actual usage recorded.");
+                setUsageJobId(null);
+              }}
+            />;
+          })()}
+        </DialogContent>
+      </Dialog>
       <Dialog open={open} onOpenChange={(v) => !v && setOpen(false)}>
         <DialogContent>
           <DialogHeader>
@@ -91,6 +128,35 @@ function JobsPage() {
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+function JobUsageForm({ job, onCancel, onSave }: {
+  job: import("@/lib/types").Job;
+  onCancel: () => void;
+  onSave: (resources: import("@/lib/types").JobResourceUsage[], reason: string) => void;
+}) {
+  const planned = job.planned_resources || [];
+  const [rows, setRows] = useState(() => planned.map((r) => ({ ...r, qty: r.qty, rate: r.rate })));
+  const [reason, setReason] = useState(job.variance_reason || "");
+  return (
+    <div className="space-y-3">
+      {rows.length === 0 ? <p className="text-sm text-ink-muted">This job has no planned resources yet. Convert an accepted quotation into a job to carry its material plan automatically.</p> : null}
+      {rows.map((r, i) => (
+        <div key={r.resource_id} className="rounded-lg border border-line p-3">
+          <p className="mb-2 text-sm font-medium">{r.description} <span className="text-xs text-ink-muted">({r.unit})</span></p>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Actual quantity"><Input type="number" step="any" value={r.qty} onChange={(e) => setRows((x) => x.map((row, n) => n === i ? { ...row, qty: Number(e.target.value) } : row))} /></Field>
+            <Field label="Actual rate"><Input type="number" step="any" value={r.rate} onChange={(e) => setRows((x) => x.map((row, n) => n === i ? { ...row, rate: Number(e.target.value) } : row))} /></Field>
+          </div>
+          <p className="text-xs text-ink-muted">Actual amount: KSh {(Number(r.qty || 0) * Number(r.rate || 0)).toLocaleString()}</p>
+        </div>
+      ))}
+      <Field label="Variance reason" hint="optional">
+        <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Material wastage, design modification, rework, customer change…" />
+      </Field>
+      <div className="flex justify-end gap-2"><Button variant="ghost" onClick={onCancel}>Cancel</Button><Button onClick={() => onSave(rows.map((r) => ({ ...r, amount: Number(r.qty || 0) * Number(r.rate || 0) })), reason)}>Save actuals</Button></div>
+    </div>
   );
 }
 

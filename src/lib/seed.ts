@@ -30,5 +30,9 @@ export function buildSeed(): LifeState {
     saccos: [],
     offers: [],
     liabilities: {},
+    price_history: [],
+    labour_rates: [],
+    transport_rates: [],
+    pricing_settings: [],
   };
 }

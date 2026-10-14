@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -17,6 +18,7 @@ import {
 } from "./roles";
 import { getCatalogueTemplate } from "./catalogue-templates";
 import { buildSeed } from "./seed";
+import { calculateQuotation } from "./pricing-engine";
 
 const LifeContext = createContext<any>(null);
 import type {
@@ -44,6 +46,11 @@ import type {
   Product,
   ProductCategory,
   ProductVariant,
+  PriceHistory,
+  LabourRate,
+  TransportRate,
+  PricingSettings,
+  JobResourceUsage,
   Quotation,
   Relationship,
   RequestStatus,
@@ -170,6 +177,10 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     next.product_categories = Array.isArray(next.product_categories) ? next.product_categories : [];
     next.product_specs = Array.isArray(next.product_specs) ? next.product_specs : [];
     next.product_variants = Array.isArray(next.product_variants) ? next.product_variants : [];
+    next.price_history = Array.isArray(next.price_history) ? next.price_history : [];
+    next.labour_rates = Array.isArray(next.labour_rates) ? next.labour_rates : [];
+    next.transport_rates = Array.isArray(next.transport_rates) ? next.transport_rates : [];
+    next.pricing_settings = Array.isArray(next.pricing_settings) ? next.pricing_settings : [];
     next.products = (next.products || []).map((p) => ({
       ...p,
       item_kind: p.item_kind === "service" ? "service" : "product",
@@ -180,12 +191,29 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       image_url: p.image_url || "",
       gallery: Array.isArray(p.gallery) ? p.gallery : [],
       listed: true, // always available for quotations
+      pricing_method: p.pricing_method || "manual",
+      price_factor: Number.isFinite(Number(p.price_factor)) ? Number(p.price_factor) : 1,
+      pricing_unit: p.pricing_unit || p.unit,
+      price_override: typeof p.price_override === "number" ? p.price_override : undefined,
+      last_price_changed_at: p.last_price_changed_at || "",
     }));
     next.product_variants = next.product_variants.map((v) => ({
       ...v,
       specs: v.specs && typeof v.specs === "object" ? v.specs : {},
       sku: v.sku || "",
     }));
+    for (const business of next.businesses || []) {
+      if (!next.pricing_settings.some((x) => x.business_id === business.business_id)) {
+        next.pricing_settings.push({
+          business_id: business.business_id,
+          default_markup_percent: 20,
+          default_waste_percent: 5,
+          overhead_percent: 0,
+          default_profit_margin_percent: 20,
+          require_quote_approval: true,
+        });
+      }
+    }
     return next;
   };
 
@@ -249,6 +277,180 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [state, ready, authenticated]);
 
+  // ── Owner → customer sync ────────────────────────────────────────────────
+  // Every account has its own private state row, so owner edits to a linked
+  // customer (details, charges, payments, charge mode, delete) must be pushed
+  // to that customer's row explicitly. Runs on change, so it also repairs
+  // customers that are already out of sync.
+  const lastPushedRef = useRef("");
+  const linkedTabsRef = useRef<Map<string, { business_id: string; user_id: string }>>(new Map());
+
+  useEffect(() => {
+    if (!ready || !authenticated) return;
+    const me = state.currentUserId;
+    const ownedIds = new Set(
+      state.businesses.filter((b) => b.owner_user_id === me).map((b) => b.business_id),
+    );
+    const linked = state.customers.filter(
+      (c) => c.user_id && c.user_id !== me && ownedIds.has(c.business_id),
+    );
+    const linkedIds = new Set(linked.map((c) => c.customer_id));
+    const removed = [...linkedTabsRef.current.entries()]
+      .filter(([id]) => !linkedIds.has(id))
+      .map(([customer_id, v]) => ({ customer_id, ...v }));
+    if (linked.length === 0 && removed.length === 0) return;
+    const ledger = state.ledger.filter((e) => linkedIds.has(e.customer_id));
+    // Push quotations for linked LifeBoost customers so they see "quotation received".
+    const quotations = (state.quotations || []).filter((q) => linkedIds.has(q.customer_id));
+    const payload = JSON.stringify({ customers: linked, ledger, removed, quotations });
+    if (payload === lastPushedRef.current) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch("/api/customers/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: payload,
+        });
+        if (res.ok) {
+          lastPushedRef.current = payload;
+          linkedTabsRef.current = new Map(
+            linked.map((c) => [c.customer_id, { business_id: c.business_id, user_id: c.user_id }]),
+          );
+        }
+      } catch {
+        // Offline: lastPushedRef stays stale, so the next state change retries.
+      }
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [state.customers, state.ledger, state.quotations, state.businesses, state.currentUserId, ready, authenticated]);
+
+  // ── Customer -> owner: sync customer-recorded payments ───────────────────
+  // The API validates the accepted relationship and applies each entry_id once.
+  // Re-sending is safe, so temporary network failures are retried on state changes.
+  const lastPaymentPushRef = useRef("");
+  useEffect(() => {
+    if (!ready || !authenticated || !state.currentUserId) return;
+    const me = state.currentUserId;
+    const ownedIds = new Set(state.businesses.filter((b) => b.owner_user_id === me).map((b) => b.business_id));
+    const activeBusinessIds = new Set(
+      state.relationships
+        .filter((r) => r.user_id === me && r.relationship_type === "customer" && String(r.status || "").toLowerCase() === "active")
+        .map((r) => r.business_id),
+    );
+    const payments = state.ledger.filter((entry) =>
+      entry.type === "payment" && entry.posted_by === me && !ownedIds.has(entry.business_id) && activeBusinessIds.has(entry.business_id),
+    );
+    if (!payments.length) return;
+    const payload = JSON.stringify({ payments });
+    if (payload === lastPaymentPushRef.current) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch("/api/customers/payment-sync", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          credentials: "include", body: payload,
+        });
+        if (res.ok) lastPaymentPushRef.current = payload;
+      } catch {
+        // Leave the signature unchanged so a later state change retries.
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [state.ledger, state.relationships, state.businesses, state.currentUserId, ready, authenticated]);
+
+  // ── Customer side: pick up what the owner pushed ─────────────────────────
+  useEffect(() => {
+    if (!ready || !authenticated) return;
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const res = await fetch("/api/state", { credentials: "include", cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const { state: remote } = (await res.json()) as { state: LifeState | null };
+        if (!remote || cancelled) return;
+        setState((prev) => {
+          const me = prev.currentUserId;
+          const ownedIds = new Set(
+            prev.businesses.filter((b) => b.owner_user_id === me).map((b) => b.business_id),
+          );
+          const isMyTab = (c: Customer) => c.user_id === me && !ownedIds.has(c.business_id);
+          const remoteTabs = (remote.customers || []).filter(isMyTab);
+          const remoteIds = new Set(remoteTabs.map((c) => c.customer_id));
+          const localTabs = prev.customers.filter(isMyTab);
+          const localIds = new Set(localTabs.map((c) => c.customer_id));
+
+          const nextCustomers = [
+            ...prev.customers.filter((c) => !isMyTab(c)),
+            ...remoteTabs,
+          ];
+          const remoteLedger = (remote.ledger || []).filter((e) => remoteIds.has(e.customer_id));
+          const byId = new Map(
+            prev.ledger.filter((e) => localIds.has(e.customer_id) && remoteIds.has(e.customer_id)).map((e) => [e.entry_id, e]),
+          );
+          for (const e of remoteLedger) byId.set(e.entry_id, e);
+          const nextLedger = [
+            ...prev.ledger.filter((e) => !localIds.has(e.customer_id) && !remoteIds.has(e.customer_id)),
+            ...[...byId.values()].sort((a, b) => String(b.date).localeCompare(String(a.date))),
+          ];
+
+          // Quotations the owner pushed onto this account (matched to my tabs).
+          const remoteQuotes = (remote.quotations || []).filter((q) => remoteIds.has(q.customer_id));
+          const remoteQuoteIds = new Set(remoteQuotes.map((q) => q.quote_id));
+          const localQuoteIds = new Set(
+            (prev.quotations || [])
+              .filter((q) => localIds.has(q.customer_id) || remoteIds.has(q.customer_id))
+              .map((q) => q.quote_id),
+          );
+          const quoteById = new Map(
+            (prev.quotations || [])
+              .filter((q) => localIds.has(q.customer_id) || remoteIds.has(q.customer_id))
+              .map((q) => [q.quote_id, q]),
+          );
+          for (const q of remoteQuotes) quoteById.set(q.quote_id, q);
+          const nextQuotations = [
+            ...(prev.quotations || []).filter(
+              (q) => !localIds.has(q.customer_id) && !remoteIds.has(q.customer_id) && !remoteQuoteIds.has(q.quote_id),
+            ),
+            ...[...quoteById.values()].sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))),
+          ];
+
+          const sig = (cs: Customer[], ls: LedgerEntry[], qs: { quote_id: string; status: string; total: number }[]) =>
+            JSON.stringify([
+              [...cs].sort((a, b) => a.customer_id.localeCompare(b.customer_id)),
+              [...ls].sort((a, b) => a.entry_id.localeCompare(b.entry_id)),
+              [...qs].sort((a, b) => a.quote_id.localeCompare(b.quote_id)).map((q) => [q.quote_id, q.status, q.total]),
+            ]);
+          const before = sig(
+            localTabs,
+            prev.ledger.filter((e) => localIds.has(e.customer_id)),
+            (prev.quotations || []).filter((q) => localIds.has(q.customer_id) || localQuoteIds.has(q.quote_id)),
+          );
+          const after = sig(
+            remoteTabs,
+            nextLedger.filter((e) => remoteIds.has(e.customer_id)),
+            nextQuotations.filter((q) => remoteIds.has(q.customer_id) || remoteQuoteIds.has(q.quote_id)),
+          );
+          if (before === after) return prev; // nothing new: avoid re-render + needless PUT
+          return { ...prev, customers: nextCustomers, ledger: nextLedger, quotations: nextQuotations };
+        });
+      } catch {
+        // Network blip; try again on the next tick.
+      }
+    };
+    const interval = window.setInterval(() => void pull(), 15000);
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void pull();
+    };
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [ready, authenticated]);
+
   const api = useMemo(() => {
     const currentUser =
       state.users.find((u) => u.user_id === state.currentUserId) ?? state.users[0] ?? guestUser;
@@ -301,6 +503,17 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     const businessEmployees = state.employees.filter((e) => e.business_id === bid);
     const businessSales = state.sales.filter((s) => s.business_id === bid);
     const businessProducts = state.products.filter((p) => p.business_id === bid);
+    const businessPriceHistory = (state.price_history || []).filter((x) => x.business_id === bid);
+    const businessLabourRates = (state.labour_rates || []).filter((x) => x.business_id === bid);
+    const businessTransportRates = (state.transport_rates || []).filter((x) => x.business_id === bid);
+    const pricingSettings = (state.pricing_settings || []).find((x) => x.business_id === bid) || {
+      business_id: bid,
+      default_markup_percent: 20,
+      default_waste_percent: 5,
+      overhead_percent: 0,
+      default_profit_margin_percent: 20,
+      require_quote_approval: true,
+    };
     const businessGoods = businessProducts.filter((p) => (p.item_kind || "product") !== "service");
     const businessServices = businessProducts.filter((p) => p.item_kind === "service");
     const businessCategories = (state.product_categories || []).filter((c) => c.business_id === bid);
@@ -362,6 +575,9 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     const myCustomerSales = state.sales.filter((s) =>
       myTabs.some((t) => t.customer_id === s.customer_id),
     );
+    const myCustomerQuotes = (state.quotations || []).filter((q) =>
+      myTabs.some((t) => t.customer_id === q.customer_id),
+    );
 
     const scopedBusinessIds = visibleBusinesses.map((b) => b.business_id);
     const allCustomers = allow("view_collections")
@@ -404,6 +620,10 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       businessCategories,
       businessSpecDefs,
       businessVariants,
+      businessPriceHistory,
+      businessLabourRates,
+      businessTransportRates,
+      pricingSettings,
       businessExpenses,
       businessJobs,
       myJobs,
@@ -414,6 +634,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       myOffers,
       myConnections,
       myCustomerJobs,
+      myCustomerQuotes,
       myCustomerSales,
       marketProfessionals,
       marketBusinesses,
@@ -481,6 +702,10 @@ export function LifeProvider({ children }: { children: ReactNode }) {
             product_categories: (prev.product_categories || []).filter((x) => x.business_id !== businessId),
             product_specs: (prev.product_specs || []).filter((x) => x.business_id !== businessId),
             product_variants: (prev.product_variants || []).filter((x) => x.business_id !== businessId),
+            price_history: (prev.price_history || []).filter((x) => x.business_id !== businessId),
+            labour_rates: (prev.labour_rates || []).filter((x) => x.business_id !== businessId),
+            transport_rates: (prev.transport_rates || []).filter((x) => x.business_id !== businessId),
+            pricing_settings: (prev.pricing_settings || []).filter((x) => x.business_id !== businessId),
             jobs: prev.jobs.filter((x) => x.business_id !== businessId),
             quotations: prev.quotations.filter((x) => x.business_id !== businessId),
             invoices: prev.invoices.filter((x) => x.business_id !== businessId),
@@ -507,13 +732,109 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         setState((prev) => ({ ...prev, sales: prev.sales.filter((x) => x.sale_id !== saleId) }));
       },
       updateProduct: (productId, patch) => {
-        setState((prev) => ({ ...prev, products: prev.products.map((p) => p.product_id === productId ? { ...p, ...patch } : p) }));
+        setState((prev) => {
+          const current = prev.products.find((p) => p.product_id === productId);
+          if (!current) return prev;
+          const nextProduct = { ...current, ...patch };
+          const priceChanged =
+            typeof patch.selling_price === "number" &&
+            Number(patch.selling_price) !== Number(current.selling_price);
+          const history = priceChanged
+            ? [
+                {
+                  price_history_id: uid("PH"),
+                  business_id: current.business_id,
+                  product_id: productId,
+                  old_price: Number(current.selling_price || 0),
+                  new_price: Number(patch.selling_price),
+                  unit: current.unit,
+                  changed_by: prev.currentUserId,
+                  reason: "Manual catalogue price update",
+                  effective_from: new Date().toISOString(),
+                  created_at: new Date().toISOString(),
+                } as PriceHistory,
+                ...(prev.price_history || []),
+              ]
+            : prev.price_history || [];
+          return {
+            ...prev,
+            products: prev.products.map((p) => (p.product_id === productId ? {
+              ...nextProduct,
+              last_price_changed_at: priceChanged ? new Date().toISOString() : p.last_price_changed_at,
+            } : p)),
+            price_history: history,
+          };
+        });
       },
       deleteProduct: (productId) => {
         setState((prev) => ({
           ...prev,
           products: prev.products.filter((p) => p.product_id !== productId),
           product_variants: (prev.product_variants || []).filter((v) => v.product_id !== productId),
+        }));
+      },
+      updatePricingSettings: (patch: Partial<PricingSettings>) => {
+        setState((prev) => {
+          const bid = prev.selectedBusinessId;
+          const existing = (prev.pricing_settings || []).find((x) => x.business_id === bid);
+          const next = {
+            business_id: bid,
+            default_markup_percent: existing?.default_markup_percent ?? 20,
+            default_waste_percent: existing?.default_waste_percent ?? 5,
+            overhead_percent: existing?.overhead_percent ?? 0,
+            default_profit_margin_percent: existing?.default_profit_margin_percent ?? 20,
+            require_quote_approval: existing?.require_quote_approval ?? true,
+            ...patch,
+          };
+          return {
+            ...prev,
+            pricing_settings: [
+              next,
+              ...(prev.pricing_settings || []).filter((x) => x.business_id !== bid),
+            ],
+          };
+        });
+      },
+      addLabourRate: (form: Omit<LabourRate, "labour_rate_id" | "business_id">) => {
+        setState((prev) => ({
+          ...prev,
+          labour_rates: [
+            { ...form, labour_rate_id: uid("LAB"), business_id: prev.selectedBusinessId },
+            ...(prev.labour_rates || []),
+          ],
+        }));
+      },
+      updateLabourRate: (id: string, patch: Partial<LabourRate>) => {
+        setState((prev) => ({
+          ...prev,
+          labour_rates: (prev.labour_rates || []).map((x) => x.labour_rate_id === id ? { ...x, ...patch } : x),
+        }));
+      },
+      deleteLabourRate: (id: string) => {
+        setState((prev) => ({ ...prev, labour_rates: (prev.labour_rates || []).filter((x) => x.labour_rate_id !== id) }));
+      },
+      addTransportRate: (form: Omit<TransportRate, "transport_rate_id" | "business_id">) => {
+        setState((prev) => ({
+          ...prev,
+          transport_rates: [
+            { ...form, transport_rate_id: uid("TRN"), business_id: prev.selectedBusinessId },
+            ...(prev.transport_rates || []),
+          ],
+        }));
+      },
+      updateTransportRate: (id: string, patch: Partial<TransportRate>) => {
+        setState((prev) => ({
+          ...prev,
+          transport_rates: (prev.transport_rates || []).map((x) => x.transport_rate_id === id ? { ...x, ...patch } : x),
+        }));
+      },
+      deleteTransportRate: (id: string) => {
+        setState((prev) => ({ ...prev, transport_rates: (prev.transport_rates || []).filter((x) => x.transport_rate_id !== id) }));
+      },
+      updateProductPricing: (productId: string, patch: Partial<Product>) => {
+        setState((prev) => ({
+          ...prev,
+          products: prev.products.map((p) => p.product_id === productId ? { ...p, ...patch } : p),
         }));
       },
       addBusiness: async (form) => {
@@ -718,20 +1039,20 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           // Only create a cross-account relationship when the email belongs to
           // a real LifeBoost account. The server writes the invitation directly
           // into that account's private user_state row.
-          userId = linkedUserId || existing?.user_id || "";
-          if (linkedUserId) {
+          // Only link a real LifeBoost account returned by the invite API —
+          // never the current user, and never a stale entry from local state.users.
+          userId = linkedUserId && linkedUserId !== state.currentUserId ? linkedUserId : "";
+          if (userId) {
             const hasRel = relationships.some(
               (r) =>
-                r.user_id === linkedUserId &&
+                r.user_id === userId &&
                 r.business_id === state.selectedBusinessId &&
                 r.relationship_type === "customer",
             );
             if (!hasRel) {
-              relationships = [...relationships, { ...relationship, user_id: linkedUserId }];
-              offers = [...offers, { ...offer, user_id: linkedUserId }];
+              relationships = [...relationships, { ...relationship, user_id: userId }];
+              offers = [...offers, { ...offer, user_id: userId }];
             }
-          } else if (existing?.user_id) {
-            userId = existing.user_id;
           }
         }
         const ledger = [...state.ledger];
@@ -829,20 +1150,18 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           );
           // Do not invent a user id when the email is not a registered
           // LifeBoost account. A real account is linked by the server endpoint.
-          userId = linkedUserId || existing?.user_id || "";
-          if (linkedUserId) {
+          userId = linkedUserId && linkedUserId !== state.currentUserId ? linkedUserId : "";
+          if (userId) {
             const hasRel = relationships.some(
               (r) =>
-                r.user_id === linkedUserId &&
+                r.user_id === userId &&
                 r.business_id === state.selectedBusinessId &&
                 r.relationship_type === "employee",
             );
             if (!hasRel) {
-              relationships = [...relationships, { ...relationship, user_id: linkedUserId }];
-              offers = [...offers, { ...offer, user_id: linkedUserId }];
+              relationships = [...relationships, { ...relationship, user_id: userId }];
+              offers = [...offers, { ...offer, user_id: userId }];
             }
-          } else if (existing?.user_id) {
-            userId = existing.user_id;
           }
         }
 
@@ -1052,6 +1371,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         sku?: string;
         description?: string;
         specs?: SpecValues;
+        family?: string;
         itemKind?: "product" | "service";
       }) => {
         setState((prev) => ({
@@ -1065,6 +1385,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               item_kind: form.itemKind === "service" ? "service" : "product",
               category: form.category,
               category_id: form.categoryId || "",
+              family: (form.family || "").trim(),
               unit: form.unit || (form.itemKind === "service" ? "job" : "unit"),
               selling_price: Number(form.sellingPrice || 0),
               cost_price: Number(form.costPrice || 0),
@@ -1076,6 +1397,9 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               specs: form.specs || {},
               image_url: "",
               gallery: [],
+              pricing_method: "manual",
+              price_factor: 1,
+              pricing_unit: form.unit || "unit",
             },
           ],
         }));
@@ -1129,6 +1453,9 @@ export function LifeProvider({ children }: { children: ReactNode }) {
                 specs: form.specs || {},
                 image_url: "",
                 gallery: [],
+                pricing_method: "manual",
+                price_factor: 1,
+                pricing_unit: form.unit || (kind === "service" ? "job" : "unit"),
               };
             })
             .filter(Boolean) as typeof prev.products;
@@ -1138,6 +1465,110 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           };
         });
         return added || rows.length;
+      },
+      /**
+       * "Add item list": create (or reuse) a category, add any new specification
+       * columns to it, and add every table row as a product in ONE state update,
+       * so the ids always line up.
+       */
+      createItemList: (form: {
+        itemKind: "product" | "service";
+        categoryId?: string;
+        newCategory?: { name: string; unit?: string };
+        newSpecs?: { key: string; label: string; unit: string; dataType: "number" | "text" }[];
+        rows: {
+          family: string;
+          name: string;
+          sku?: string;
+          unit?: string;
+          sellingPrice?: string | number;
+          costPrice?: string | number;
+          stock?: string | number;
+          specs: Record<string, string | number>;
+        }[];
+      }) => {
+        const kind = form.itemKind === "service" ? "service" : "product";
+        const count = form.rows.filter((r) => String(r.name || "").trim()).length;
+        if (!count) return 0;
+        setState((prev) => {
+          const bid = prev.selectedBusinessId;
+          if (!bid) return prev;
+          let categories = prev.product_categories || [];
+          let specDefs = prev.product_specs || [];
+          let categoryId = form.categoryId || "";
+          let categoryName =
+            categories.find((c) => c.category_id === categoryId && c.business_id === bid)?.name || "";
+          let unitDefault =
+            categories.find((c) => c.category_id === categoryId)?.unit_default || "";
+          if (!categoryId && form.newCategory?.name.trim()) {
+            categoryId = uid("CAT");
+            categoryName = form.newCategory.name.trim();
+            unitDefault = form.newCategory.unit?.trim() || (kind === "service" ? "job" : "unit");
+            categories = [
+              ...categories,
+              {
+                category_id: categoryId,
+                business_id: bid,
+                name: categoryName,
+                description: "",
+                unit_default: unitDefault,
+              },
+            ];
+          }
+          if (categoryId) {
+            const have = new Set(specDefs.filter((s) => s.category_id === categoryId).map((s) => s.key));
+            let order = have.size;
+            const added = [];
+            for (const sp of form.newSpecs || []) {
+              if (!sp.key || !sp.label.trim() || have.has(sp.key)) continue;
+              have.add(sp.key);
+              added.push({
+                spec_id: uid("SPC"),
+                category_id: categoryId,
+                business_id: bid,
+                key: sp.key,
+                label: sp.label.trim(),
+                unit: sp.unit.trim(),
+                data_type: sp.dataType,
+                sort_order: order++,
+              });
+            }
+            specDefs = [...specDefs, ...added];
+          }
+          const defaultUnit = unitDefault || (kind === "service" ? "job" : "unit");
+          const products = form.rows
+            .filter((r) => String(r.name || "").trim())
+            .map((r) => ({
+              product_id: uid("PRD"),
+              business_id: bid,
+              name: String(r.name).trim(),
+              item_kind: kind as "product" | "service",
+              category: categoryName,
+              category_id: categoryId,
+              family: (r.family || "").trim(),
+              unit: (r.unit || "").trim() || defaultUnit,
+              selling_price: Number(r.sellingPrice || 0),
+              cost_price: Number(r.costPrice || 0),
+              stock: kind === "service" ? 0 : Number(r.stock || 0),
+              status: "active",
+              listed: true,
+              sku: r.sku || "",
+              description: "",
+              specs: r.specs || {},
+              image_url: "",
+              gallery: [],
+              pricing_method: "manual" as const,
+              price_factor: 1,
+              pricing_unit: (r.unit || "").trim() || defaultUnit,
+            }));
+          return {
+            ...prev,
+            product_categories: categories,
+            product_specs: specDefs,
+            products: [...prev.products, ...products],
+          };
+        });
+        return count;
       },
       uploadProductMedia: async (productId: string, files: { name: string; media_type: string; dataUrl: string }[]) => {
         for (const file of files) {
@@ -1461,27 +1892,98 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               job_id: uid("JOB"),
               business_id: prev.selectedBusinessId,
               employee_id: form.employeeId,
-              customer_id: "",
+              customer_id: form.customerId || "",
+              quotation_id: form.quotationId,
               title: form.title,
               description: form.description,
               start_date: form.startDate,
               due_date: form.dueDate,
               estimated_cost: Number(form.estimatedCost || 0),
               status: form.status || "Not started",
+              planned_resources: form.plannedResources || [],
+              actual_resources: [],
             },
             ...prev.jobs,
           ],
         }));
       },
+      createJobFromQuotation: (quoteId: string) => {
+        let jobId = "";
+        setState((prev) => {
+          const quote = prev.quotations.find((q) => q.quote_id === quoteId);
+          if (!quote || quote.status !== "Accepted") return prev;
+          const existing = prev.jobs.find((j) => j.quotation_id === quoteId);
+          if (existing) {
+            jobId = existing.job_id;
+            return prev;
+          }
+          jobId = uid("JOB");
+          const planned = (quote.line_items || []).map((li) => ({
+            resource_id: uid("RES"),
+            product_id: li.source_product_id,
+            description: li.description,
+            qty: Number(li.qty || 0),
+            unit: li.unit,
+            rate: Number(li.rate || 0),
+            amount: Number(li.amount || 0),
+            source: li.source_product_id ? "catalogue" as const : "manual" as const,
+          }));
+          return {
+            ...prev,
+            jobs: [{
+              job_id: jobId,
+              business_id: quote.business_id,
+              employee_id: "",
+              customer_id: quote.customer_id,
+              quotation_id: quoteId,
+              title: `Job for ${quote.customer_name} · ${quote.quote_id}`,
+              description: quote.notes || "",
+              start_date: new Date().toISOString().slice(0, 10),
+              due_date: "",
+              estimated_cost: quote.total,
+              status: "Not started" as JobStatus,
+              planned_resources: planned,
+              actual_resources: [],
+            }, ...prev.jobs],
+          };
+        });
+        return jobId;
+      },
+      recordJobActuals: (jobId: string, resources: JobResourceUsage[], reason = "") => {
+        setState((prev) => ({
+          ...prev,
+          jobs: prev.jobs.map((j) => j.job_id === jobId ? {
+            ...j,
+            actual_resources: resources,
+            variance_reason: reason,
+          } : j),
+        }));
+      },
       updateJobStatus: (jobId, status) => {
         setState((prev) => ({
           ...prev,
-          jobs: prev.jobs.map((j) => (j.job_id === jobId ? { ...j, status } : j)),
+          jobs: prev.jobs.map((j) => (j.job_id === jobId ? {
+            ...j,
+            status,
+            completed_at: status === "Completed" ? new Date().toISOString() : j.completed_at,
+          } : j)),
         }));
       },
       addQuotation: (form) => {
         setState((prev) => {
-          const customer = prev.customers.find((c) => c.customer_id === form.customerId);
+          const me = prev.currentUserId;
+          const bid = prev.selectedBusinessId;
+          const customer = prev.customers.find(
+            (c) => c.customer_id === form.customerId && c.business_id === bid,
+          );
+          if (!customer) {
+            // Invalid / missing selection — do not create a quote on the wrong tab.
+            return prev;
+          }
+          // Never treat the owner as the receiving customer of their own quote.
+          if (customer.user_id && customer.user_id === me) {
+            return prev;
+          }
           const pricingBusiness = form.pricingBusinessId
             ? prev.businesses.find((b) => b.business_id === form.pricingBusinessId)
             : undefined;
@@ -1492,17 +1994,43 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           const total = form.lineItems?.length ? lineItemsTotal : Number(form.total || 0);
           const quoteId = uid("QTE");
           const quoteDate = new Date().toISOString();
+<<<<<<< HEAD
 
           // Review & Accept: quote is only "Sent" until explicitly accepted.
           // No customer charge / balance change until acceptQuotation.
+=======
+          const quoteSettings = (prev.pricing_settings || []).find(
+            (x) => x.business_id === bid,
+          ) || {
+            business_id: bid,
+            default_markup_percent: 20,
+            default_waste_percent: 5,
+            overhead_percent: 0,
+            default_profit_margin_percent: 20,
+            require_quote_approval: true,
+          };
+          const calculation = form.lineItems?.length
+            ? calculateQuotation(form.lineItems, quoteSettings)
+            : undefined;
+
+          // Review & Accept: quote is only "Sent" until explicitly accepted.
+          // No customer charge / balance change until acceptQuotation.
+          // customer_id is the OWNER's tab id; sync maps it to the customer's local tab.
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
           return {
             ...prev,
             quotations: [
               {
                 quote_id: quoteId,
+<<<<<<< HEAD
                 business_id: prev.selectedBusinessId,
                 customer_id: form.customerId,
                 customer_name: customer?.name ?? "Customer",
+=======
+                business_id: bid,
+                customer_id: customer.customer_id,
+                customer_name: customer.name || "Customer",
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
                 total,
                 status: "Sent",
                 date: quoteDate,
@@ -1511,6 +2039,10 @@ export function LifeProvider({ children }: { children: ReactNode }) {
                 pricing_business_id: form.pricingBusinessId,
                 pricing_business_name: pricingBusiness?.business_name,
                 line_items: form.lineItems,
+<<<<<<< HEAD
+=======
+                calculation,
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
                 share_token: uid("QTK").replace(/[^a-zA-Z0-9]/g, "").slice(0, 16) || uid("QTK"),
               },
               ...prev.quotations,
@@ -1607,6 +2139,15 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           };
         });
       },
+<<<<<<< HEAD
+=======
+      markQuotationReviewed: (quoteId: string) => {
+        setState((prev) => ({ ...prev, quotations: prev.quotations.map((q) => q.quote_id === quoteId && q.status === "Received" ? { ...q, status: "Reviewed" } : q) }));
+      },
+      requestQuotationChanges: (quoteId: string, message: string) => {
+        setState((prev) => ({ ...prev, quotations: prev.quotations.map((q) => q.quote_id === quoteId && q.status !== "Accepted" && q.status !== "Rejected" ? { ...q, status: "Changes requested", notes: `${q.notes ? `${q.notes}\n\n` : ""}Requested changes: ${message}` } : q) }));
+      },
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
       updateQuotation: (quoteId, form) => {
         setState((prev) => {
           const existing = prev.quotations.find((q) => q.quote_id === quoteId);
@@ -1622,6 +2163,22 @@ export function LifeProvider({ children }: { children: ReactNode }) {
             0,
           );
           const newTotal = form.lineItems?.length ? lineItemsTotal : Number(form.total || 0);
+<<<<<<< HEAD
+=======
+          const quoteSettings = (prev.pricing_settings || []).find(
+            (x) => x.business_id === existing.business_id,
+          ) || {
+            business_id: existing.business_id,
+            default_markup_percent: 20,
+            default_waste_percent: 5,
+            overhead_percent: 0,
+            default_profit_margin_percent: 20,
+            require_quote_approval: true,
+          };
+          const calculation = form.lineItems?.length
+            ? calculateQuotation(form.lineItems, quoteSettings)
+            : undefined;
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
           const oldTotal = Number(existing.total || 0);
           const isAccepted = existing.status === "Accepted";
           const oldCharge = prev.ledger.find(

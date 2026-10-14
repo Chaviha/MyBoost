@@ -9,7 +9,50 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import nodemailer from "nodemailer";
 
+
 const { Pool } = pg;
+
+// Cloudflare R2 is S3-compatible. When configured, uploads go to durable object
+// storage; otherwise local development keeps using the existing /uploads folder.
+const r2Enabled = Boolean(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET_NAME && process.env.R2_PUBLIC_URL);
+const r2Endpoint = r2Enabled ? `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : "";
+const r2PublicBase = String(process.env.R2_PUBLIC_URL || "").replace(/\/+$/, "");
+const hmac = (key, value, encoding) => crypto.createHmac("sha256", key).update(value, "utf8").digest(encoding);
+function awsEncode(value) { return encodeURIComponent(value).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`); }
+function r2ObjectUrl(key) { return `${r2PublicBase}/${key.split("/").map(awsEncode).join("/")}`; }
+async function r2Request(method, key, body, contentType = "application/octet-stream") {
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const date = amzDate.slice(0, 8);
+  const encodedKey = key.split("/").map(awsEncode).join("/");
+  const url = `${r2Endpoint}/${awsEncode(process.env.R2_BUCKET_NAME)}/${encodedKey}`;
+  const payloadHash = crypto.createHash("sha256").update(body || Buffer.alloc(0)).digest("hex");
+  const host = new URL(url).host;
+  const canonicalHeaders = `content-type:${contentType}\nhost:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = "content-type;host;x-amz-content-sha256;x-amz-date";
+  const canonicalRequest = `${method}\n/${awsEncode(process.env.R2_BUCKET_NAME)}/${encodedKey}\n\n${canonicalHeaders}${signedHeaders}\n${payloadHash}`;
+  const scope = `${date}/auto/s3/aws4_request`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${crypto.createHash("sha256").update(canonicalRequest).digest("hex")}`;
+  const kDate = hmac(`AWS4${process.env.R2_SECRET_ACCESS_KEY}`, date);
+  const kRegion = crypto.createHmac("sha256", kDate).update("auto").digest();
+  const kService = crypto.createHmac("sha256", kRegion).update("s3").digest();
+  const kSigning = crypto.createHmac("sha256", kService).update("aws4_request").digest();
+  const signature = crypto.createHmac("sha256", kSigning).update(stringToSign).digest("hex");
+  const authorization = `AWS4-HMAC-SHA256 Credential=${process.env.R2_ACCESS_KEY_ID}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  const response = await fetch(url, { method, headers: { "content-type": contentType, "x-amz-content-sha256": payloadHash, "x-amz-date": amzDate, authorization }, ...(method === "PUT" ? { body } : {}) });
+  if (!response.ok) throw new Error(`Cloudflare R2 ${method} failed (${response.status}): ${(await response.text()).slice(0, 300)}`);
+}
+async function saveUpload(key, localPath, buffer, contentType) {
+  if (r2Enabled) { await r2Request("PUT", key, buffer, contentType); return r2ObjectUrl(key); }
+  fs.mkdirSync(path.dirname(localPath), { recursive: true });
+  fs.writeFileSync(localPath, buffer);
+  return null;
+}
+async function removeUpload(key, localPath) {
+  if (r2Enabled) { await r2Request("DELETE", key, Buffer.alloc(0)); return; }
+  if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadRoot = path.join(__dirname, "..", "uploads", "businesses");
 const assetUploadRoot = path.join(__dirname, "..", "uploads", "assets");
@@ -314,11 +357,12 @@ app.post("/api/businesses/:businessId/media", auth, async (req, res, next) => {
     const mediaId = crypto.randomUUID();
     const filename = `${mediaId}.${parsed.ext}`;
     const dir = path.join(uploadRoot, businessId);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, filename), parsed.buffer);
+    const storageKey = `businesses/${businessId}/${filename}`;
+    const storedUrl = await saveUpload(storageKey, path.join(dir, filename), parsed.buffer, parsed.mime);
     const media = {
       media_id: mediaId,
-      url: `/uploads/businesses/${encodeURIComponent(businessId)}/${filename}`,
+      ...(r2Enabled ? { storage_key: storageKey } : {}),
+      url: storedUrl || `/uploads/businesses/${encodeURIComponent(businessId)}/${filename}`,
       name: safeFilename(req.body.name || filename),
       media_type: parsed.media_type,
       created_at: new Date().toISOString(),
@@ -350,8 +394,8 @@ app.delete("/api/businesses/:businessId/media/:mediaId", auth, async (req, res, 
     const gallery = Array.isArray(business.gallery) ? business.gallery : [];
     const media = gallery.find((item) => item.media_id === mediaId);
     if (!media) return res.status(404).json({ error: "File not found" });
-    const filePath = path.join(uploadRoot, businessId, path.basename(new URL(`http://localhost${media.url}`).pathname));
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const filePath = path.join(uploadRoot, businessId, path.basename(new URL(media.url, "http://localhost").pathname));
+    if (media.storage_key) await removeUpload(media.storage_key, filePath); else if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     const remaining = gallery.filter((item) => item.media_id !== mediaId);
     const image_url = remaining.find((item) => item.media_type === "image")?.url || "";
     const nextState = { ...access.state, businesses: access.state.businesses.map((b) => b.business_id === businessId ? { ...b, gallery: remaining, image_url } : b) };
@@ -394,11 +438,12 @@ app.post("/api/assets/:assetId/media", auth, async (req, res, next) => {
     const mediaId = crypto.randomUUID();
     const filename = `${mediaId}.${parsed.ext}`;
     const dir = path.join(assetUploadRoot, assetId);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, filename), parsed.buffer);
+    const storageKey = `assets/${assetId}/${filename}`;
+    const storedUrl = await saveUpload(storageKey, path.join(dir, filename), parsed.buffer, parsed.mime);
     const media = {
       media_id: mediaId,
-      url: `/uploads/assets/${encodeURIComponent(assetId)}/${filename}`,
+      ...(r2Enabled ? { storage_key: storageKey } : {}),
+      url: storedUrl || `/uploads/assets/${encodeURIComponent(assetId)}/${filename}`,
       name: safeFilename(req.body.name || filename),
       media_type: parsed.media_type,
       created_at: new Date().toISOString(),
@@ -430,8 +475,8 @@ app.delete("/api/assets/:assetId/media/:mediaId", auth, async (req, res, next) =
     const gallery = Array.isArray(asset.gallery) ? asset.gallery : [];
     const media = gallery.find((item) => item.media_id === mediaId);
     if (!media) return res.status(404).json({ error: "File not found" });
-    const filePath = path.join(assetUploadRoot, assetId, path.basename(new URL(`http://localhost${media.url}`).pathname));
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const filePath = path.join(assetUploadRoot, assetId, path.basename(new URL(media.url, "http://localhost").pathname));
+    if (media.storage_key) await removeUpload(media.storage_key, filePath); else if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     const remaining = gallery.filter((item) => item.media_id !== mediaId);
     const image_url = remaining.find((item) => item.media_type === "image")?.url || "";
     const nextState = { ...access.state, assets: access.state.assets.map((a) => a.asset_id === assetId ? { ...a, gallery: remaining, image_url } : a) };
@@ -451,11 +496,12 @@ app.post("/api/products/:productId/media", auth, async (req, res, next) => {
     const mediaId = crypto.randomUUID();
     const filename = `${mediaId}.${parsed.ext}`;
     const dir = path.join(productUploadRoot, productId);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, filename), parsed.buffer);
+    const storageKey = `products/${productId}/${filename}`;
+    const storedUrl = await saveUpload(storageKey, path.join(dir, filename), parsed.buffer, parsed.mime);
     const media = {
       media_id: mediaId,
-      url: `/uploads/products/${encodeURIComponent(productId)}/${filename}`,
+      ...(r2Enabled ? { storage_key: storageKey } : {}),
+      url: storedUrl || `/uploads/products/${encodeURIComponent(productId)}/${filename}`,
       name: safeFilename(req.body.name || filename),
       media_type: parsed.media_type,
       created_at: new Date().toISOString(),
@@ -487,8 +533,8 @@ app.delete("/api/products/:productId/media/:mediaId", auth, async (req, res, nex
     const gallery = Array.isArray(product.gallery) ? product.gallery : [];
     const media = gallery.find((item) => item.media_id === mediaId);
     if (!media) return res.status(404).json({ error: "File not found" });
-    const filePath = path.join(productUploadRoot, productId, path.basename(new URL(`http://localhost${media.url}`).pathname));
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const filePath = path.join(productUploadRoot, productId, path.basename(new URL(media.url, "http://localhost").pathname));
+    if (media.storage_key) await removeUpload(media.storage_key, filePath); else if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     const remaining = gallery.filter((item) => item.media_id !== mediaId);
     const image_url = remaining.find((item) => item.media_type === "image")?.url || "";
     const nextState = {
@@ -627,11 +673,22 @@ app.post("/api/public/marketplace/businesses/:businessId/contact", async (req, r
   } catch (error) { next(error); }
 });
 
+<<<<<<< HEAD
 /** Find a quotation by public share_token across all user_state blobs. */
+=======
+/** Find a quotation by public share_token across all user_state blobs.
+ * Prefer the business owner's copy (source of truth). After owner→customer sync
+ * the same share_token can exist on both accounts — never treat the customer's
+ * mirror as the primary record for accept/reject/email. */
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 async function findQuoteByShareToken(token) {
   const t = String(token || "").trim();
   if (!t) return null;
   const rows = await pool.query("SELECT user_id, state FROM user_state");
+<<<<<<< HEAD
+=======
+  const matches = [];
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
   for (const row of rows.rows) {
     const state = row.state || {};
     const quotes = Array.isArray(state.quotations) ? state.quotations : [];
@@ -643,18 +700,42 @@ async function findQuoteByShareToken(token) {
     const customer = Array.isArray(state.customers)
       ? state.customers.find((c) => c.customer_id === quote.customer_id)
       : null;
+<<<<<<< HEAD
     return { userId: row.user_id, state, quote, business, customer };
   }
   return null;
+=======
+    const isOwner =
+      business && String(business.owner_user_id || "") === String(row.user_id);
+    matches.push({ userId: row.user_id, state, quote, business, customer, isOwner: !!isOwner });
+  }
+  if (!matches.length) return null;
+  const preferred = matches.find((m) => m.isOwner) || matches[0];
+  return {
+    userId: preferred.userId,
+    state: preferred.state,
+    quote: preferred.quote,
+    business: preferred.business,
+    customer: preferred.customer,
+  };
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 }
 
 function dueStatusServer(dueDate, amount) {
   const n = Number(amount || 0);
+<<<<<<< HEAD
   if (n <= 0) return "Settled";
   if (!dueDate) return "Open";
   const due = new Date(dueDate).getTime();
   if (!Number.isFinite(due)) return "Open";
   return due < Date.now() ? "Overdue" : "Open";
+=======
+  if (n <= 0) return "Paid";
+  if (!dueDate) return "Pending";
+  const due = new Date(dueDate).getTime();
+  if (!Number.isFinite(due)) return "Pending";
+  return due < Date.now() ? "Overdue" : "Pending";
+>>>>>>> 96672fa (Add quotation workflow and Cloudflare R2 storage)
 }
 
 /** Public: customer views quotation without login */
@@ -1242,6 +1323,252 @@ app.post("/api/meetings/:meetingId/messages", auth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+
+
+// AI-assisted quotation brief. Requires a server-side OPENAI_API_KEY; never expose it in the browser.
+app.post("/api/ai/quote-assist", auth, async (req, res) => {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({ error: "AI assistant is not configured yet. Add OPENAI_API_KEY to the backend environment and restart the server." });
+    }
+    const requestText = String(req.body?.request || "").trim().slice(0, 6000);
+    const details = String(req.body?.details || "").trim().slice(0, 4000);
+    const attachments = Array.isArray(req.body?.attachments) ? req.body.attachments.slice(0, 5) : [];
+    if (!requestText) return res.status(400).json({ error: "Describe the item or job you want quoted." });
+    const content = [{
+      type: "text",
+      text: `Help prepare a fabrication quotation brief, not a fabricated final price. User request: ${requestText}\nAdditional details: ${details || "None provided"}. Review any supplied images for visible features and readable dimensions. Return: 1) your understanding of the item, 2) visible/confirmed dimensions, 3) missing questions to ask before pricing, 4) likely materials and operations as suggestions only, 5) a checklist of inputs needed to calculate material, cutting, welding/labour, finish/paint, transport and delivery. Never invent dimensions, catalogue prices, weights or lead times. Clearly distinguish observations from assumptions. For PDFs, CAD or unsupported attachments, state that the file may need manual review and do not claim to have parsed it.`
+    }];
+    for (const file of attachments) {
+      if (!file || typeof file.data !== "string" || file.data.length > 11_000_000) continue;
+      if (/^data:image\/(png|jpeg|webp);base64,/i.test(file.data)) {
+        content.push({ type: "image_url", image_url: { url: file.data, detail: "high" } });
+        content.push({ type: "text", text: `Image attachment: ${String(file.name || "image").slice(0, 200)}` });
+      } else {
+        content.push({ type: "text", text: `Attachment ${String(file.name || "file").slice(0, 200)} (${String(file.type || "unknown type")}): this endpoint cannot inspect this file format directly. Ask the user to provide screenshots/images or confirm dimensions manually.` });
+      }
+    }
+    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-4o-mini", messages: [{ role: "system", content: "You are LifeBoost's careful fabrication quotation assistant. Be practical, clear and safety-conscious. Never invent prices or imply a quote is saved." }, { role: "user", content }], temperature: 0.2, max_tokens: 1400 })
+    });
+    const payload = await aiResponse.json().catch(() => ({}));
+    if (!aiResponse.ok) {
+      console.error("AI quote assistant provider error:", aiResponse.status, payload?.error?.message || "unknown");
+      return res.status(502).json({ error: "The AI assistant could not process this request. Check the backend AI configuration and try again." });
+    }
+    return res.json({ answer: payload.choices?.[0]?.message?.content || "No response was returned." });
+  } catch (error) {
+    console.error("AI quote assistant error:", error);
+    return res.status(500).json({ error: "AI assistant encountered an unexpected error." });
+  }
+});
+
+/**
+ * Owner -> linked customer sync.
+ * Each account keeps its own private user_state row, so edits an owner makes to a
+ * customer (details, charges, payments, charge mode, deletion) never reach the
+ * customer's own row unless we write them there. The owner's client calls this
+ * whenever its linked customers or their ledger change.
+ */
+const CUSTOMER_STATUSES = new Set(["Pending", "Due soon", "Overdue", "Paid"]);
+const CHARGE_MODES = new Set(["owner", "customer", "both"]);
+
+/** Customer -> business owner payment sync.
+ * A linked customer may submit only their own payment ledger entries. The server
+ * validates the accepted relationship and owner-side customer tab, applies each
+ * payment once (entry_id idempotency), and updates the owner's balance + ledger.
+ */
+app.post("/api/customers/payment-sync", auth, async (req, res, next) => {
+  const payments = Array.isArray(req.body?.payments) ? req.body.payments.slice(0, 500) : [];
+  if (!payments.length) return res.json({ ok: true, applied: 0 });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const customerRow = await client.query("SELECT state FROM user_state WHERE user_id = $1 FOR UPDATE", [req.user.id]);
+    const customerState = customerRow.rows[0]?.state;
+    if (!customerState) { await client.query("ROLLBACK"); return res.status(404).json({ error: "Customer account state not found" }); }
+    const relationships = Array.isArray(customerState.relationships) ? customerState.relationships : [];
+    const businesses = Array.isArray(customerState.businesses) ? customerState.businesses : [];
+    let applied = 0;
+    for (const payment of payments) {
+      const businessId = String(payment?.business_id || "");
+      const entryId = String(payment?.entry_id || "");
+      const amount = Number(payment?.amount);
+      if (!businessId || !entryId || payment?.type !== "payment" || String(payment?.posted_by) !== String(req.user.id) || !Number.isFinite(amount) || amount <= 0) continue;
+      const relationship = relationships.find((r) => r?.business_id === businessId && r?.relationship_type === "customer" && String(r?.status || "").toLowerCase() === "active");
+      const business = businesses.find((b) => b?.business_id === businessId && b?.owner_user_id);
+      if (!relationship || !business) continue;
+      const ownerId = String(business.owner_user_id);
+      const ownerRow = await client.query("SELECT state FROM user_state WHERE user_id = $1 FOR UPDATE", [ownerId]);
+      const ownerState = ownerRow.rows[0]?.state;
+      if (!ownerState) continue;
+      const ownerCustomers = Array.isArray(ownerState.customers) ? ownerState.customers : [];
+      const tabIndex = ownerCustomers.findIndex((c) => c?.business_id === businessId && String(c?.user_id) === String(req.user.id));
+      if (tabIndex < 0) continue;
+      const ownerTab = ownerCustomers[tabIndex];
+      ownerState.ledger = Array.isArray(ownerState.ledger) ? ownerState.ledger : [];
+      if (ownerState.ledger.some((e) => e?.entry_id === entryId)) continue;
+      const paid = Math.min(Number(ownerTab.amount || 0), amount);
+      if (paid <= 0) continue;
+      const nextAmount = Math.max(0, Number(ownerTab.amount || 0) - paid);
+      const dueDate = String(ownerTab.due_date || "");
+      const status = nextAmount <= 0 ? "Paid" : dueDate && new Date(dueDate) < new Date() ? "Overdue" : dueDate && (new Date(dueDate).getTime() - Date.now()) <= 7 * 86400000 ? "Due soon" : "Pending";
+      ownerCustomers[tabIndex] = { ...ownerTab, amount: nextAmount, status };
+      ownerState.customers = ownerCustomers;
+      ownerState.ledger.unshift({
+        entry_id: entryId, business_id: businessId, customer_id: ownerTab.customer_id,
+        type: "payment", amount: paid,
+        description: String(payment.description || "Payment recorded by customer"),
+        product_id: "", qty: 0, posted_by: req.user.id,
+        date: String(payment.date || new Date().toISOString()),
+      });
+      await client.query("UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2", [JSON.stringify(ownerState), ownerId]);
+      applied += 1;
+    }
+    await client.query("COMMIT");
+    return res.json({ ok: true, applied });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    return next(error);
+  } finally { client.release(); }
+});
+
+app.post("/api/customers/sync", auth, async (req, res, next) => {
+  try {
+    const customers = Array.isArray(req.body?.customers) ? req.body.customers.slice(0, 500) : [];
+    const ledger = Array.isArray(req.body?.ledger) ? req.body.ledger.slice(0, 20000) : [];
+    const removed = Array.isArray(req.body?.removed) ? req.body.removed.slice(0, 500) : [];
+    const quotations = Array.isArray(req.body?.quotations) ? req.body.quotations.slice(0, 2000) : [];
+
+    // The caller may only push data for businesses they own in their own state.
+    const ownerRow = await pool.query("SELECT state FROM user_state WHERE user_id = $1", [req.user.id]);
+    const ownerState = ownerRow.rows[0]?.state;
+    const owned = new Set(
+      (Array.isArray(ownerState?.businesses) ? ownerState.businesses : [])
+        .filter((b) => b?.owner_user_id === req.user.id)
+        .map((b) => b.business_id),
+    );
+
+    // Map owner customer_id -> quotes for that tab
+    const quotesByOwnerCustomerId = new Map();
+    for (const q of quotations) {
+      if (!q?.quote_id || !q?.customer_id || !owned.has(q.business_id)) continue;
+      const list = quotesByOwnerCustomerId.get(q.customer_id) || [];
+      list.push(q);
+      quotesByOwnerCustomerId.set(q.customer_id, list);
+    }
+
+    const targets = new Map(); // userId -> { upserts: [], removals: [] }
+    const bucket = (id) => {
+      if (!targets.has(id)) targets.set(id, { upserts: [], removals: [] });
+      return targets.get(id);
+    };
+    for (const c of customers) {
+      if (!c?.user_id || c.user_id === req.user.id || !owned.has(c.business_id)) continue;
+      bucket(String(c.user_id)).upserts.push(c);
+    }
+    for (const r of removed) {
+      if (!r?.user_id || r.user_id === req.user.id || !owned.has(r.business_id)) continue;
+      bucket(String(r.user_id)).removals.push(r);
+    }
+
+    let synced = 0;
+    for (const [targetUserId, { upserts, removals }] of targets) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const row = await client.query("SELECT state FROM user_state WHERE user_id = $1 FOR UPDATE", [targetUserId]);
+        const target = row.rows[0]?.state;
+        if (!target) { await client.query("ROLLBACK"); continue; }
+        target.customers = Array.isArray(target.customers) ? target.customers : [];
+        target.ledger = Array.isArray(target.ledger) ? target.ledger : [];
+        target.relationships = Array.isArray(target.relationships) ? target.relationships : [];
+        target.quotations = Array.isArray(target.quotations) ? target.quotations : [];
+
+        for (const c of upserts) {
+          // Only sync once the customer accepted the invitation (that creates their tab).
+          const accepted = target.relationships.some(
+            (r) =>
+              r?.user_id === targetUserId &&
+              r.business_id === c.business_id &&
+              r.relationship_type === "customer" &&
+              String(r.status || "").toLowerCase() === "active",
+          );
+          if (!accepted) continue;
+
+          const fields = {
+            name: String(c.name ?? ""),
+            phone: String(c.phone ?? ""),
+            email: String(c.email ?? ""),
+            amount: Number.isFinite(Number(c.amount)) ? Number(c.amount) : 0,
+            due_date: String(c.due_date ?? ""),
+            type: String(c.type ?? "individual"),
+            status: CUSTOMER_STATUSES.has(c.status) ? c.status : "Pending",
+            charge_mode: CHARGE_MODES.has(c.charge_mode) ? c.charge_mode : "both",
+          };
+          // The customer's copy was created on acceptance with a DIFFERENT customer_id,
+          // so match on user + business, and re-key ledger rows to the customer's id.
+          let tab = target.customers.find((x) => x?.user_id === targetUserId && x.business_id === c.business_id);
+          if (tab) Object.assign(tab, fields);
+          else {
+            tab = { customer_id: c.customer_id, business_id: c.business_id, user_id: targetUserId, ...fields };
+            target.customers.push(tab);
+          }
+          const byId = new Map(target.ledger.map((e) => [e?.entry_id, e]));
+          for (const e of ledger) {
+            if (e?.customer_id !== c.customer_id || !e.entry_id) continue;
+            byId.set(e.entry_id, { ...e, customer_id: tab.customer_id });
+          }
+          target.ledger = [...byId.values()].sort((a, b) => String(b?.date || "").localeCompare(String(a?.date || "")));
+
+          // Upsert quotations for this customer tab (re-key customer_id to the customer's local id).
+          const ownerQuotes = quotesByOwnerCustomerId.get(c.customer_id) || [];
+          if (ownerQuotes.length) {
+            const qById = new Map(target.quotations.map((q) => [q?.quote_id, q]));
+            for (const q of ownerQuotes) {
+              if (!q?.quote_id) continue;
+              // Prefer owner's terminal status if both have one; otherwise take owner copy.
+              const existing = qById.get(q.quote_id);
+              const ownerStatus = String(q.status || "Sent");
+              const localStatus = existing ? String(existing.status || "") : "";
+              // Owner is source of truth for Sent/Accepted/Rejected from business side.
+              qById.set(q.quote_id, {
+                ...q,
+                customer_id: tab.customer_id,
+                status: ownerStatus || localStatus || "Sent",
+              });
+            }
+            target.quotations = [...qById.values()].sort((a, b) =>
+              String(b?.date || "").localeCompare(String(a?.date || "")),
+            );
+          }
+          synced += 1;
+        }
+
+        for (const r of removals) {
+          const gone = target.customers.filter((x) => x?.user_id === targetUserId && x.business_id === r.business_id);
+          const goneIds = new Set(gone.map((x) => x.customer_id));
+          target.customers = target.customers.filter((x) => !goneIds.has(x?.customer_id));
+          target.ledger = target.ledger.filter((e) => !goneIds.has(e?.customer_id));
+          target.quotations = target.quotations.filter((q) => !goneIds.has(q?.customer_id));
+          synced += 1;
+        }
+
+        await client.query("UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2", [JSON.stringify(target), targetUserId]);
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+    res.json({ ok: true, synced });
+  } catch (error) { next(error); }
+});
+
 app.get("/api/state", auth, async (req, res, next) => {
   try {
     const result = await pool.query("SELECT state FROM user_state WHERE user_id = $1", [req.user.id]);
@@ -1280,12 +1607,17 @@ app.post("/api/account/avatar", auth, async (req, res, next) => {
       return res.status(400).json({ error: "Use a JPG, PNG, WEBP or GIF image up to 6MB." });
     }
     const dir = path.join(avatarUploadRoot, req.user.id);
-    fs.mkdirSync(dir, { recursive: true });
-    // Remove any previous avatar files for this user before writing the new one.
-    for (const existing of fs.readdirSync(dir)) fs.unlinkSync(path.join(dir, existing));
     const filename = `${crypto.randomUUID()}.${parsed.ext}`;
-    fs.writeFileSync(path.join(dir, filename), parsed.buffer);
-    const avatarUrl = `/uploads/avatars/${encodeURIComponent(req.user.id)}/${filename}`;
+    const previous = await pool.query("SELECT avatar_url FROM users WHERE id=$1", [req.user.id]);
+    const oldUrl = previous.rows[0]?.avatar_url || "";
+    if (oldUrl) {
+      const oldName = path.basename(new URL(oldUrl, "http://localhost").pathname);
+      if (oldUrl.startsWith(r2PublicBase + "/") && r2Enabled) await removeUpload(`avatars/${req.user.id}/${oldName}`, path.join(dir, oldName));
+      else if (fs.existsSync(path.join(dir, oldName))) fs.unlinkSync(path.join(dir, oldName));
+    }
+    const storageKey = `avatars/${req.user.id}/${filename}`;
+    const storedUrl = await saveUpload(storageKey, path.join(dir, filename), parsed.buffer, parsed.mime);
+    const avatarUrl = storedUrl || `/uploads/avatars/${encodeURIComponent(req.user.id)}/${filename}`;
     const result = await pool.query("UPDATE users SET avatar_url=$1, updated_at=NOW() WHERE id=$2 RETURNING *", [avatarUrl, req.user.id]);
     res.json({ user: userDto(result.rows[0]) });
   } catch (error) { next(error); }
@@ -1294,8 +1626,12 @@ app.post("/api/account/avatar", auth, async (req, res, next) => {
 app.delete("/api/account/avatar", auth, async (req, res, next) => {
   try {
     const dir = path.join(avatarUploadRoot, req.user.id);
-    if (fs.existsSync(dir)) {
-      for (const existing of fs.readdirSync(dir)) fs.unlinkSync(path.join(dir, existing));
+    const current = await pool.query("SELECT avatar_url FROM users WHERE id=$1", [req.user.id]);
+    const oldUrl = current.rows[0]?.avatar_url || "";
+    if (oldUrl) {
+      const oldName = path.basename(new URL(oldUrl, "http://localhost").pathname);
+      if (oldUrl.startsWith(r2PublicBase + "/") && r2Enabled) await removeUpload(`avatars/${req.user.id}/${oldName}`, path.join(dir, oldName));
+      else if (fs.existsSync(path.join(dir, oldName))) fs.unlinkSync(path.join(dir, oldName));
     }
     const result = await pool.query("UPDATE users SET avatar_url='', updated_at=NOW() WHERE id=$1 RETURNING *", [req.user.id]);
     res.json({ user: userDto(result.rows[0]) });
