@@ -90,6 +90,7 @@ const NAV: NavGroup[] = [
     items: [
       { to: "/work", label: "My jobs", icon: ClipboardList, when: "employee" },
       { to: "/requests", label: "Requests", icon: Send, when: "employee" },
+      { to: "/requests", label: "Requests", icon: Send, when: "customer" },
       { to: "/tab", label: "My orders", icon: ShoppingCart, when: "customer" },
     ],
   },
@@ -596,6 +597,7 @@ function NotificationsMenu({
   canApprove: boolean;
 }) {
   const [meetingItems, setMeetingItems] = useState<NotifItem[]>([]);
+  const [serverItems, setServerItems] = useState<NotifItem[]>([]);
   const [open, setOpen] = useState(false);
 
   const loadMeetings = useCallback(async () => {
@@ -646,31 +648,39 @@ function NotificationsMenu({
     if (open) void loadMeetings();
   }, [open, loadMeetings]);
 
+  const loadNotifications = useCallback(async () => {
+    try {
+      const response = await fetch("/api/notifications", { credentials: "include", cache: "no-store" });
+      if (!response.ok) return;
+      const payload = await response.json();
+      setServerItems((payload.notifications || []).map((item: { id: string; title: string; detail: string; href: string; created_at: string }) => ({
+        id: `server-${item.id}`,
+        kind: "LifeBoost notification",
+        title: item.title || "Notification",
+        detail: item.detail || "",
+        href: item.href || "/",
+        when: new Date(item.created_at).getTime() || 0,
+        icon: Bell,
+      })));
+    } catch {
+      /* notifications are optional while offline */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadNotifications();
+    const id = window.setInterval(() => void loadNotifications(), 60_000);
+    return () => window.clearInterval(id);
+  }, [loadNotifications]);
+
+  useEffect(() => {
+    if (open) void loadNotifications();
+  }, [open, loadNotifications]);
+
   const items = useMemo(() => {
     const list: NotifItem[] = [];
 
-    const pendingRequests = (canApprove ? businessRequests : myRequests).filter(
-      (r) => r.status === "Pending",
-    );
-    for (const r of pendingRequests) {
-      const biz =
-        state.businesses.find((b) => b.business_id === r.business_id)?.business_name ||
-        "Business";
-      const requester =
-        state.users.find((u) => u.user_id === r.user_id)?.name ||
-        state.employees.find((e) => e.user_id === r.user_id)?.name ||
-        "Someone";
-      const isOwnerView = canApprove && r.user_id !== currentUserId;
-      list.push({
-        id: `req-${r.request_id}`,
-        kind: isOwnerView ? "Employee / customer request" : "Your request",
-        title: r.reason || r.type || "Money request",
-        detail: `${isOwnerView ? requester : biz} · ${money(r.amount)} · ${r.status}`,
-        href: "/requests",
-        when: new Date(r.request_date).getTime() || 0,
-        icon: Send,
-      });
-    }
+    // Requests now come from the server (customer/employee -> owner) as notifications.
 
     for (const o of myOffers.filter((x) => x.status === "Open")) {
       const kindLabel =
@@ -738,7 +748,7 @@ function NotificationsMenu({
       }
     }
 
-    list.push(...meetingItems);
+    list.push(...meetingItems, ...serverItems);
 
     return list
       .sort((a, b) => b.when - a.when)
@@ -749,6 +759,7 @@ function NotificationsMenu({
     canApprove,
     currentUserId,
     meetingItems,
+    serverItems,
     myOffers,
     myRequests,
     myTabs,

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { SearchFilter } from "@/components/search-filter";
 import { useLife } from "@/lib/store";
 
 export const Route = createFileRoute("/_app/specifications")({
@@ -39,6 +40,7 @@ function SpecificationsPage() {
   } = useLife();
   const [open, setOpen] = useState(false);
   const [filterCategory, setFilterCategory] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (!can("view_products")) {
     return <AccessDenied need="Product catalogues are for business owners." />;
@@ -49,9 +51,10 @@ function SpecificationsPage() {
 
   const filtered = useMemo(() => {
     const list = businessSpecDefs.slice().sort((a, b) => a.sort_order - b.sort_order);
-    if (!filterCategory) return list;
-    return list.filter((s) => s.category_id === filterCategory);
-  }, [businessSpecDefs, filterCategory]);
+    const categoryFiltered = filterCategory ? list.filter((s) => s.category_id === filterCategory) : list;
+    if (!searchQuery.trim()) return categoryFiltered;
+    return categoryFiltered.filter((item) => `${item.label} ${item.key} ${item.unit} ${businessCategories.find((c) => c.category_id === item.category_id)?.name ?? ""}`.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [businessSpecDefs, businessCategories, filterCategory, searchQuery]);
 
   const categoryName = (id: string) =>
     businessCategories.find((c) => c.category_id === id)?.name || "Category";
@@ -71,6 +74,7 @@ function SpecificationsPage() {
         }}
       />
       <CatalogueSubnav />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search specifications…" />
 
       {businessCategories.length > 0 ? (
         <div className="mb-4 flex flex-wrap items-center gap-2">

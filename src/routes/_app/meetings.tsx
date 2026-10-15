@@ -7,12 +7,14 @@ import {
   MessageSquare,
   Plus,
   Save,
+  Search,
   Users,
   Video,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { Toolbar } from "@/components/app-shell";
+import { MoreActions } from "@/components/more-actions";
 import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
 import { Avatar } from "@/components/avatar";
@@ -94,6 +96,8 @@ function MeetingsPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [openCreate, setOpenCreate] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const selected = useMemo(
     () => meetings.find((meeting) => meeting.meeting_id === selectedId) ?? meetings[0],
@@ -161,6 +165,49 @@ function MeetingsPage() {
     }
   }
 
+  async function deleteMeeting(meeting: Meeting) {
+    if (!window.confirm(`Delete meeting "${meeting.title}"? This also deletes its discussion messages.`)) return;
+    try {
+      const response = await fetch(`/api/meetings/${meeting.meeting_id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Unable to delete meeting");
+      setMeetings((current) => current.filter((item) => item.meeting_id !== meeting.meeting_id));
+      setSelectedId((current) => current === meeting.meeting_id ? "" : current);
+      toast.success("Meeting deleted.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete meeting");
+    }
+  }
+
+  async function editMeeting(meeting: Meeting) {
+    const title = window.prompt("Meeting title", meeting.title);
+    if (title === null) return;
+    const agenda = window.prompt("Meeting agenda", meeting.agenda);
+    if (agenda === null) return;
+    const nextTitle = title.trim();
+    if (nextTitle.length < 2) {
+      toast.error("Meeting title must contain at least 2 characters.");
+      return;
+    }
+    try {
+      const response = await fetch(`/api/meetings/${meeting.meeting_id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ title: nextTitle, agenda }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update meeting");
+      setMeetings((current) => current.map((item) => item.meeting_id === meeting.meeting_id ? payload.meeting : item));
+      toast.success("Meeting details updated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update meeting");
+    }
+  }
+
   async function sendMessage(body: string) {
     if (!selected || !body.trim()) return;
     try {
@@ -194,12 +241,18 @@ function MeetingsPage() {
       ) : (
         <div className="grid gap-5 lg:grid-cols-[20rem_1fr]">
           <Card className="h-fit overflow-hidden p-2">
-            <div className="flex items-center gap-2 px-3 py-3">
-              <CalendarDays className="size-4 text-forest" />
-              <p className="font-medium">Your meetings</p>
+            <div className="flex items-center justify-between gap-2 px-3 py-3">
+              <div className="flex items-center gap-2">
+                <CalendarDays className="size-4 text-forest" />
+                <p className="font-medium">Your meetings</p>
+              </div>
+              <Button size="icon" variant="ghost" aria-label="Search meetings" title="Search meetings" onClick={() => setSearchOpen((value) => !value)}>
+                <Search className="size-4" />
+              </Button>
             </div>
+            {searchOpen ? <div className="px-2 pb-2"><Input autoFocus value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search title, agenda, status…" /></div> : null}
             <div className="space-y-1">
-              {meetings.map((meeting) => (
+              {meetings.filter((meeting) => `${meeting.title} ${meeting.agenda} ${meeting.status} ${meeting.organizer_name} ${meeting.organizer_email}`.toLowerCase().includes(searchQuery.toLowerCase())).map((meeting) => (
                 <button
                   type="button"
                   key={meeting.meeting_id}
@@ -208,7 +261,15 @@ function MeetingsPage() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <p className="font-medium">{meeting.title}</p>
-                    <StatusBadge status={meeting.status} />
+                    <div className="flex items-center gap-1">
+                      <StatusBadge status={meeting.status} />
+                      <span onClick={(event) => event.stopPropagation()}>
+                        <MoreActions actions={[
+                          { label: "Edit meeting", onSelect: () => void editMeeting(meeting) },
+                          { label: "Delete meeting", destructive: true, onSelect: () => void deleteMeeting(meeting), disabled: meeting.organizer_user_id !== currentUser.user_id },
+                        ]} label={`Actions for ${meeting.title}`} />
+                      </span>
+                    </div>
                   </div>
                   <p className="mt-1 text-xs text-ink-muted">{formatDate(meeting.start_at)}</p>
                   <p className="mt-1 text-xs text-ink-muted">

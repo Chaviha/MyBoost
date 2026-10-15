@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Boxes, Download, Ellipsis, FileSpreadsheet, FileUp, ImagePlus, Package, Pencil, Share2, Table2, Trash2 } from "lucide-react";
+import { Boxes, Download, FileSpreadsheet, FileUp, ImagePlus, Package, Pencil, Share2, Table2, Trash2 } from "lucide-react";
+import { MoreActions } from "@/components/more-actions";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
@@ -34,6 +35,7 @@ import {
   type ImportedProductRow,
 } from "@/lib/product-import";
 import type { SpecValues } from "@/lib/types";
+import { SearchFilter } from "@/components/search-filter";
 import { useLife } from "@/lib/store";
 
 /** Prefer explicit cover, else first gallery image. */
@@ -84,6 +86,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
   const viewerFor = businessProducts.find((p) => p.product_id === viewerForId) || null;
   const viewerCover = viewerFor ? itemCoverUrl(viewerFor) : "";
   const [viewerPreviewUrl, setViewerPreviewUrl] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const catalogueItems = businessProducts.filter((p) =>
     isService ? p.item_kind === "service" : (p.item_kind || "product") !== "service",
@@ -158,6 +161,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
         onAction={() => setChooserOpen(true)}
       />
       <CatalogueSubnav />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search products and services…" />
 
       <div className="mb-4 flex flex-wrap gap-2">
         <Button type="button" variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
@@ -342,7 +346,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                     </td>
                   </tr>
                 ) : (
-                  tableRows.map((p) => {
+                  tableRows.filter((p) => `${p.name} ${p.sku ?? ""} ${p.family ?? ""}`.toLowerCase().includes(searchQuery.toLowerCase())).map((p) => {
                     const variantCount = businessVariants.filter(
                       (v) => v.product_id === p.product_id,
                     ).length;
@@ -747,24 +751,16 @@ function ProductMoreMenu({
   onImages: () => void;
   onDelete: () => void;
 }) {
+  // Radix dropdown: closes on outside click, Escape, and after choosing an action.
   return (
-    <details className="relative">
-      <summary className="flex size-9 cursor-pointer list-none items-center justify-center rounded-md border border-line bg-surface text-ink-muted hover:bg-canvas hover:text-ink [&::-webkit-details-marker]:hidden">
-        <Ellipsis className="size-4" />
-        <span className="sr-only">More product actions</span>
-      </summary>
-      <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-line bg-surface p-1 shadow-lg">
-        <button type="button" className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-canvas" onClick={onEdit}>
-          <Pencil className="size-3.5" /> Edit product
-        </button>
-        <button type="button" className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-canvas" onClick={onImages}>
-          <ImagePlus className="size-3.5" /> Manage images
-        </button>
-        <button type="button" className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-600 hover:bg-canvas" onClick={onDelete}>
-          <Trash2 className="size-3.5" /> Delete product
-        </button>
-      </div>
-    </details>
+    <MoreActions
+      label="More product actions"
+      actions={[
+        { label: "Edit product", icon: <Pencil className="size-3.5" />, onSelect: onEdit },
+        { label: "Manage images", icon: <ImagePlus className="size-3.5" />, onSelect: onImages },
+        { label: "Delete product", icon: <Trash2 className="size-3.5" />, destructive: true, onSelect: onDelete },
+      ]}
+    />
   );
 }
 

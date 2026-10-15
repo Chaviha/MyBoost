@@ -72,3 +72,65 @@ CREATE TABLE IF NOT EXISTS meeting_messages (
 
 CREATE INDEX IF NOT EXISTS meetings_organizer_idx ON meetings(organizer_user_id);
 CREATE INDEX IF NOT EXISTS meeting_messages_meeting_idx ON meeting_messages(meeting_id, created_at);
+
+
+-- In-app notifications used by Smart Collection and other account workflows.
+CREATE TABLE IF NOT EXISTS app_notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  href TEXT NOT NULL DEFAULT '/',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  read_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS app_notifications_user_created_idx
+  ON app_notifications(user_id, created_at DESC);
+
+
+-- Prevent duplicate scheduled collection reminders for the same customer/due-date rule.
+CREATE TABLE IF NOT EXISTS collection_reminder_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  customer_id TEXT NOT NULL,
+  due_date DATE NOT NULL,
+  timing TEXT NOT NULL,
+  days INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(owner_user_id, customer_id, due_date, timing, days)
+);
+
+
+-- Customer/employee -> business owner requests (progress updates, questions, money asks).
+-- Requests are always addressed to the owner of a business by someone linked to it;
+-- an owner cannot create one for their own business.
+CREATE TABLE IF NOT EXISTS work_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id TEXT NOT NULL,
+  owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  from_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  from_role TEXT NOT NULL CHECK (from_role IN ('employee','customer')),
+  business_name TEXT NOT NULL DEFAULT '',
+  job_id TEXT NOT NULL DEFAULT '',
+  job_title TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'Progress update',
+  amount NUMERIC NOT NULL DEFAULT 0,
+  body TEXT NOT NULL DEFAULT '',
+  images JSONB NOT NULL DEFAULT '[]'::jsonb,
+  status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending','Approved','Rejected','Acknowledged')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS work_request_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id UUID NOT NULL REFERENCES work_requests(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  body TEXT NOT NULL DEFAULT '',
+  images JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS work_requests_owner_idx ON work_requests(owner_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS work_requests_from_idx ON work_requests(from_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS work_request_messages_request_idx ON work_request_messages(request_id, created_at);

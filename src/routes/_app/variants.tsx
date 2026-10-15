@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { money } from "@/lib/format";
 import type { SpecValues } from "@/lib/types";
+import { SearchFilter } from "@/components/search-filter";
 import { useLife } from "@/lib/store";
 
 export const Route = createFileRoute("/_app/variants")({
@@ -40,6 +41,7 @@ function VariantsPage() {
   } = useLife();
   const [open, setOpen] = useState(false);
   const [filterProduct, setFilterProduct] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (!can("view_products")) {
     return <AccessDenied need="Product catalogues are for business owners." />;
@@ -51,9 +53,10 @@ function VariantsPage() {
   const activeProductId = filterProduct || businessProducts[0]?.product_id || "";
 
   const filtered = useMemo(() => {
-    if (!activeProductId) return businessVariants;
-    return businessVariants.filter((v) => v.product_id === activeProductId);
-  }, [businessVariants, activeProductId]);
+    const productFiltered = activeProductId ? businessVariants.filter((v) => v.product_id === activeProductId) : businessVariants;
+    if (!searchQuery.trim()) return productFiltered;
+    return productFiltered.filter((v) => `${v.name} ${v.sku ?? ""} ${businessProducts.find((p) => p.product_id === v.product_id)?.name ?? ""}`.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [businessVariants, activeProductId, searchQuery]);
 
   const productName = (id: string) =>
     businessProducts.find((p) => p.product_id === id)?.name || "Product";
@@ -88,6 +91,7 @@ function VariantsPage() {
         }}
       />
       <CatalogueSubnav />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search options…" />
 
       {businessProducts.length > 0 ? (
         <div className="mb-4 flex flex-wrap items-center gap-2">

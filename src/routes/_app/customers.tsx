@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Bell, Minus, Plus, Search, Users, Pencil, Trash2 } from "lucide-react";
+import { Bell, CreditCard, Minus, Plus, Search, Users, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
@@ -114,6 +114,7 @@ function CustomersPage() {
                       <p className="text-xs text-ink-muted">
                         Due {formatDate(customer.due_date)}
                         {customer.user_id ? " · linked LifeBoost account" : ""}
+                        {customer.allow_customer_payments ? " · customer payments enabled" : " · customer payments disabled"}
                       </p>
                       <label className="flex items-center gap-2 text-sm">
                         <span className="text-ink-muted">Who adds charges</span>
@@ -144,6 +145,11 @@ function CustomersPage() {
                         </p>
                       )}
                       <MoreActions actions={[
+                        { label: customer.allow_customer_payments ? "Disable customer payment updates" : "Allow customer payment updates", icon: <CreditCard className="size-4" />, onSelect: () => {
+                          const allowed = !customer.allow_customer_payments;
+                          updateCustomer(customer.customer_id, { allow_customer_payments: allowed });
+                          toast.success(`${customer.name}: customer payment updates ${allowed ? "enabled" : "disabled"}.`);
+                        } },
                         { label: "Edit", icon: <Pencil className="size-4" />, onSelect: () => {
                           const name = window.prompt("Customer name", customer.name);
                           if (name === null) return;

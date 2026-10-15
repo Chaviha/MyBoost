@@ -1127,6 +1127,76 @@ app.post("/api/relationships/respond", auth, async (req, res, next) => {
 });
 
 
+// Smart Collection preferences and customer reminders.
+app.get("/api/collections/settings", auth, async (req, res, next) => {
+  try {
+    const result = await pool.query("SELECT state->'collection_settings' AS settings FROM user_state WHERE user_id=$1", [req.user.id]);
+    res.json({ settings: result.rows[0]?.settings || { channel: "lifeboost", timing: "before", days: 3 } });
+  } catch (error) { next(error); }
+});
+
+app.put("/api/collections/settings", auth, async (req, res, next) => {
+  try {
+    const channel = ["lifeboost", "whatsapp", "both"].includes(String(req.body?.channel)) ? String(req.body.channel) : "lifeboost";
+    const timing = ["before", "due", "overdue"].includes(String(req.body?.timing)) ? String(req.body.timing) : "before";
+    const days = Math.max(1, Math.min(30, Number(req.body?.days || 3)));
+    const settings = { channel, timing, days };
+    await pool.query(
+      `INSERT INTO user_state (user_id, state) VALUES ($1, jsonb_build_object('collection_settings', $2::jsonb))
+       ON CONFLICT (user_id) DO UPDATE SET state=jsonb_set(COALESCE(user_state.state, '{}'::jsonb), '{collection_settings}', $2::jsonb, true), updated_at=NOW()`,
+      [req.user.id, JSON.stringify(settings)],
+    );
+    res.json({ settings });
+  } catch (error) { next(error); }
+});
+
+app.get("/api/notifications", auth, async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, title, body AS detail, href, created_at, read_at FROM app_notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 40",
+      [req.user.id],
+    );
+    res.json({ notifications: result.rows });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/collections/:customerId/remind", auth, async (req, res, next) => {
+  try {
+    const stateResult = await pool.query("SELECT state FROM user_state WHERE user_id=$1", [req.user.id]);
+    const state = stateResult.rows[0]?.state || {};
+    const customer = (Array.isArray(state.customers) ? state.customers : []).find((item) => String(item.customer_id) === String(req.params.customerId));
+    const ownsBusiness = customer && (Array.isArray(state.businesses) ? state.businesses : []).some((business) =>
+      String(business.business_id) === String(customer.business_id) && String(business.owner_user_id || req.user.id) === String(req.user.id)
+    );
+    if (!customer || !ownsBusiness) return res.status(404).json({ error: "Customer not found in your business." });
+    const channel = ["lifeboost", "whatsapp", "both"].includes(String(req.body?.channel)) ? String(req.body.channel) : "lifeboost";
+    if ((channel === "lifeboost" || channel === "both") && !customer.user_id) {
+      return res.status(400).json({ error: "Link this customer to a LifeBoost account to send an in-app notification. WhatsApp-only reminders do not require an account." });
+    }
+    const amount = Number(customer.amount || 0);
+    const dueDate = customer.due_date ? new Date(customer.due_date).toLocaleDateString() : "the agreed date";
+    const message = `Hello ${String(customer.name || "Customer")}, this is a payment reminder for ${amount.toFixed(2)}. Due date: ${dueDate}. Please contact the business if you have already paid.`;
+    let notificationCreated = false;
+    if (channel === "lifeboost" || channel === "both") {
+      await pool.query(
+        "INSERT INTO app_notifications (user_id, title, body, href) VALUES ($1,$2,$3,$4)",
+        [customer.user_id, "Payment reminder", message, "/tab"],
+      );
+      notificationCreated = true;
+    }
+    let phone = String(customer.phone || "").replace(/[^0-9]/g, "");
+    if (phone.startsWith("0")) phone = `254${phone.slice(1)}`;
+    else if (phone.length === 9 && !phone.startsWith("254")) phone = `254${phone}`;
+    const whatsapp = channel === "whatsapp" || channel === "both"
+      ? (phone ? { phone, message, url: `https://wa.me/${phone}?text=${encodeURIComponent(message)}` } : null)
+      : null;
+    if ((channel === "whatsapp" || channel === "both") && !whatsapp) {
+      return res.status(400).json({ error: "Add a valid customer phone number before sending a WhatsApp reminder." });
+    }
+    res.json({ ok: true, notificationCreated, whatsapp });
+  } catch (error) { next(error); }
+});
+
 // Shared Meetings & Discussions. Meetings live in their own tables so invited
 // participants can see the same meeting even though LifeBoost business data
 // remains in each user's private state JSON.
@@ -1265,6 +1335,22 @@ app.patch("/api/meetings/:meetingId", auth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.delete("/api/meetings/:meetingId", auth, async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      "DELETE FROM meetings WHERE id = $1 AND organizer_user_id = $2 RETURNING id",
+      [req.params.meetingId, req.user.id],
+    );
+    if (!result.rowCount) {
+      const exists = await canAccessMeeting(req.params.meetingId, req.user.id);
+      return res.status(exists ? 403 : 404).json({
+        error: exists ? "Only the meeting organizer can delete this meeting." : "Meeting not found",
+      });
+    }
+    res.json({ ok: true, meetingId: req.params.meetingId });
+  } catch (error) { next(error); }
+});
+
 app.get("/api/meetings/:meetingId/messages", auth, async (req, res, next) => {
   try {
     const meeting = await canAccessMeeting(req.params.meetingId, req.user.id);
@@ -1387,6 +1473,7 @@ app.post("/api/customers/payment-sync", auth, async (req, res, next) => {
       const tabIndex = ownerCustomers.findIndex((c) => c?.business_id === businessId && String(c?.user_id) === String(req.user.id));
       if (tabIndex < 0) continue;
       const ownerTab = ownerCustomers[tabIndex];
+      if (ownerTab.allow_customer_payments !== true) continue; // owner has not enabled customer payment updates
       ownerState.ledger = Array.isArray(ownerState.ledger) ? ownerState.ledger : [];
       if (ownerState.ledger.some((e) => e?.entry_id === entryId)) continue;
       const paid = Math.min(Number(ownerTab.amount || 0), amount);
@@ -1402,6 +1489,7 @@ app.post("/api/customers/payment-sync", auth, async (req, res, next) => {
         description: String(payment.description || "Payment recorded by customer"),
         product_id: "", qty: 0, posted_by: req.user.id,
         date: String(payment.date || new Date().toISOString()),
+        via: "customer-sync",
       });
       await client.query("UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2", [JSON.stringify(ownerState), ownerId]);
       applied += 1;
@@ -1486,6 +1574,8 @@ app.post("/api/customers/sync", auth, async (req, res, next) => {
             type: String(c.type ?? "individual"),
             status: CUSTOMER_STATUSES.has(c.status) ? c.status : "Pending",
             charge_mode: CHARGE_MODES.has(c.charge_mode) ? c.charge_mode : "both",
+            // Owner-controlled switch: without it the customer's copy never learns it may record payments.
+            allow_customer_payments: c.allow_customer_payments === true,
           };
           // The customer's copy was created on acceptance with a DIFFERENT customer_id,
           // so match on user + business, and re-key ledger rows to the customer's id.
@@ -1555,16 +1645,59 @@ app.get("/api/state", auth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+/**
+ * Other accounts change an owner's row directly (a customer's payment, an employee's job status).
+ * An owner's browser may still hold an older copy, so before saving we re-apply anything that
+ * was written server-side and is missing from the incoming copy. Both merges are idempotent.
+ */
+function reconcileServerWrites(existing, incoming) {
+  if (!existing || typeof existing !== "object") return incoming;
+  const next = incoming;
+  const inLedger = Array.isArray(next.ledger) ? next.ledger : [];
+  const inLedgerIds = new Set(inLedger.map((e) => e?.entry_id));
+  const missing = (Array.isArray(existing.ledger) ? existing.ledger : []).filter((e) => e?.via === "customer-sync" && e.entry_id && !inLedgerIds.has(e.entry_id));
+  if (missing.length && Array.isArray(next.customers)) {
+    next.ledger = [...missing, ...inLedger];
+    for (const entry of missing) {
+      const idx = next.customers.findIndex((c) => c?.customer_id === entry.customer_id);
+      if (idx < 0) continue;
+      const tab = next.customers[idx];
+      const amount = Math.max(0, Number(tab.amount || 0) - Number(entry.amount || 0));
+      const due = String(tab.due_date || "");
+      const status = amount <= 0 ? "Paid" : due && new Date(due) < new Date() ? "Overdue" : due && (new Date(due).getTime() - Date.now()) <= 7 * 86400000 ? "Due soon" : "Pending";
+      next.customers[idx] = { ...tab, amount, status };
+    }
+  }
+  if (Array.isArray(next.jobs) && Array.isArray(existing.jobs)) {
+    const before = new Map(existing.jobs.map((j) => [j?.job_id, j]));
+    next.jobs = next.jobs.map((job) => {
+      const old = before.get(job?.job_id);
+      if (!old?.status_updated_by || !old.status_updated_at) return job;
+      if (job.status_updated_at && job.status_updated_at >= old.status_updated_at) return job;
+      return { ...job, status: old.status, status_updated_at: old.status_updated_at, status_updated_by: old.status_updated_by };
+    });
+  }
+  return next;
+}
+
 app.put("/api/state", auth, async (req, res, next) => {
+  const client = await pool.connect();
   try {
     if (!req.body.state || typeof req.body.state !== "object") return res.status(400).json({ error: "Invalid state payload" });
-    await pool.query(
+    await client.query("BEGIN");
+    const current = await client.query("SELECT state FROM user_state WHERE user_id = $1 FOR UPDATE", [req.user.id]);
+    const merged = reconcileServerWrites(current.rows[0]?.state, req.body.state);
+    await client.query(
       `INSERT INTO user_state (user_id, state) VALUES ($1,$2)
        ON CONFLICT (user_id) DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()`,
-      [req.user.id, JSON.stringify(req.body.state)],
+      [req.user.id, JSON.stringify(merged)],
     );
+    await client.query("COMMIT");
     res.json({ ok: true });
-  } catch (error) { next(error); }
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    next(error);
+  } finally { client.release(); }
 });
 
 app.patch("/api/account", auth, async (req, res, next) => {
@@ -1617,13 +1750,327 @@ app.delete("/api/account/avatar", auth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+
+// ── Employee / customer ↔ business owner: jobs, progress requests ────────────
+// Each account keeps its own state row, so an employee's or customer's jobs live in the
+// OWNER's state. These endpoints read them on demand (verified against the owner's own
+// employee/customer records) and keep requests in shared tables addressed to the owner.
+const WORK_REQUEST_KINDS = new Set(["Progress update", "Money", "Question", "Other"]);
+const WORK_REQUEST_STATUSES = new Set(["Pending", "Approved", "Rejected", "Acknowledged"]);
+const EMPLOYEE_JOB_STATUSES = new Set(["In progress", "On hold", "Ready"]);
+
+async function loadUserState(userId, client = pool) {
+  const result = await client.query("SELECT state FROM user_state WHERE user_id = $1", [userId]);
+  return result.rows[0]?.state || null;
+}
+
+/** Businesses the user is linked to as employee/customer, verified from each OWNER's records. */
+async function linkedWork(userId) {
+  const mine = await loadUserState(userId);
+  if (!mine) return [];
+  const rels = (Array.isArray(mine.relationships) ? mine.relationships : []).filter(
+    (r) => String(r?.user_id) === String(userId) && ["employee", "customer"].includes(r?.relationship_type) && String(r?.status || "").toLowerCase() === "active",
+  );
+  const out = [];
+  const ownerCache = new Map();
+  for (const rel of rels) {
+    const business = (Array.isArray(mine.businesses) ? mine.businesses : []).find((b) => b?.business_id === rel.business_id && b?.owner_user_id);
+    if (!business || String(business.owner_user_id) === String(userId)) continue;
+    const ownerId = String(business.owner_user_id);
+    if (!ownerCache.has(ownerId)) ownerCache.set(ownerId, await loadUserState(ownerId));
+    const ownerState = ownerCache.get(ownerId);
+    if (!ownerState) continue;
+    const ownerBusiness = (ownerState.businesses || []).find((b) => b?.business_id === rel.business_id && String(b.owner_user_id) === ownerId);
+    if (!ownerBusiness) continue;
+    const employeeIds = (ownerState.employees || []).filter((e) => String(e?.user_id) === String(userId) && e.business_id === rel.business_id).map((e) => e.employee_id);
+    const customerIds = (ownerState.customers || []).filter((c) => String(c?.user_id) === String(userId) && c.business_id === rel.business_id).map((c) => c.customer_id);
+    const role = rel.relationship_type;
+    if (role === "employee" && !employeeIds.length) continue;
+    if (role === "customer" && !customerIds.length) continue;
+    out.push({ role, ownerId, ownerState, business: ownerBusiness, employeeIds, customerIds });
+  }
+  return out;
+}
+
+function jobDto(job, link) {
+  return {
+    job_id: job.job_id,
+    business_id: job.business_id,
+    business_name: link.business.business_name || "Business",
+    title: job.title,
+    description: job.description || "",
+    start_date: job.start_date || "",
+    due_date: job.due_date || "",
+    status: job.status,
+    role: link.role,
+    // Internal costing is not shown to employees.
+    estimated_cost: link.role === "customer" ? Number(job.estimated_cost || 0) : 0,
+    status_updated_at: job.status_updated_at || "",
+  };
+}
+
+app.get("/api/work/jobs", auth, async (req, res, next) => {
+  try {
+    const links = await linkedWork(req.user.id);
+    const jobs = [];
+    for (const link of links) {
+      for (const job of Array.isArray(link.ownerState.jobs) ? link.ownerState.jobs : []) {
+        if (job?.business_id !== link.business.business_id) continue;
+        const mineJob = link.role === "employee" ? link.employeeIds.includes(job.employee_id) : link.customerIds.includes(job.customer_id);
+        if (mineJob) jobs.push(jobDto(job, link));
+      }
+    }
+    jobs.sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
+    res.json({ jobs });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/work/jobs/:jobId/status", auth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const jobId = String(req.params.jobId || "");
+    const status = String(req.body?.status || "");
+    if (!EMPLOYEE_JOB_STATUSES.has(status)) return res.status(400).json({ error: "Employees can set In progress, On hold or Ready" });
+    const links = (await linkedWork(req.user.id)).filter((l) => l.role === "employee");
+    const link = links.find((l) => (l.ownerState.jobs || []).some((j) => j?.job_id === jobId && l.employeeIds.includes(j.employee_id)));
+    if (!link) return res.status(403).json({ error: "This job is not assigned to you" });
+    await client.query("BEGIN");
+    const row = await client.query("SELECT state FROM user_state WHERE user_id = $1 FOR UPDATE", [link.ownerId]);
+    const ownerState = row.rows[0]?.state;
+    const job = (ownerState?.jobs || []).find((j) => j?.job_id === jobId && link.employeeIds.includes(j.employee_id));
+    if (!job) { await client.query("ROLLBACK"); return res.status(404).json({ error: "Job not found" }); }
+    if (job.status === "Completed") { await client.query("ROLLBACK"); return res.status(409).json({ error: "This job is already completed" }); }
+    job.status = status;
+    job.status_updated_at = new Date().toISOString();
+    job.status_updated_by = req.user.id;
+    await client.query("UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2", [JSON.stringify(ownerState), link.ownerId]);
+    await client.query(
+      "INSERT INTO app_notifications (user_id, title, body, href) VALUES ($1,$2,$3,$4)",
+      [link.ownerId, "Job status updated", `${req.user.name} marked "${job.title}" as ${status}.`, "/jobs"],
+    );
+    await client.query("COMMIT");
+    res.json({ job: jobDto(job, link) });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    next(error);
+  } finally { client.release(); }
+});
+
+async function saveRequestImages(requestId, dataUrls) {
+  const images = [];
+  for (const dataUrl of (Array.isArray(dataUrls) ? dataUrls : []).slice(0, 6)) {
+    const item = typeof dataUrl === "string" ? { data_url: dataUrl, name: "" } : dataUrl || {};
+    const parsed = parseMediaDataUrl(item.data_url);
+    if (!parsed || parsed.media_type !== "image") throw Object.assign(new Error("Images must be JPG, PNG, WEBP or GIF up to 6MB."), { status: 400 });
+    const filename = `${crypto.randomUUID()}.${parsed.ext}`;
+    const key = `requests/${requestId}/${filename}`;
+    const stored = await saveUpload(key, path.join(__dirname, "..", "uploads", "requests", requestId, filename), parsed.buffer, parsed.mime);
+    images.push({ name: safeFilename(item.name || filename), url: stored || `/uploads/requests/${encodeURIComponent(requestId)}/${filename}` });
+  }
+  return images;
+}
+
+async function requestsFor(userId) {
+  const rows = (await pool.query(
+    `SELECT r.*, fu.name AS from_name, ou.name AS owner_name
+       FROM work_requests r
+       JOIN users fu ON fu.id = r.from_user_id
+       JOIN users ou ON ou.id = r.owner_user_id
+      WHERE r.owner_user_id = $1 OR r.from_user_id = $1
+      ORDER BY r.created_at DESC LIMIT 200`,
+    [userId],
+  )).rows;
+  const ids = rows.map((r) => r.id);
+  const msgs = ids.length
+    ? (await pool.query(
+        `SELECT m.*, u.name AS user_name FROM work_request_messages m JOIN users u ON u.id = m.user_id
+          WHERE m.request_id = ANY($1::uuid[]) ORDER BY m.created_at`,
+        [ids],
+      )).rows
+    : [];
+  return rows.map((r) => ({
+    request_id: r.id,
+    business_id: r.business_id,
+    business_name: r.business_name,
+    job_id: r.job_id,
+    job_title: r.job_title,
+    kind: r.kind,
+    amount: Number(r.amount || 0),
+    body: r.body,
+    images: r.images || [],
+    status: r.status,
+    from_user_id: r.from_user_id,
+    from_name: r.from_name,
+    from_role: r.from_role,
+    owner_user_id: r.owner_user_id,
+    owner_name: r.owner_name,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    messages: msgs
+      .filter((m) => m.request_id === r.id)
+      .map((m) => ({ message_id: m.id, user_id: m.user_id, user_name: m.user_name, body: m.body, images: m.images || [], created_at: m.created_at })),
+  }));
+}
+
+app.get("/api/work/requests", auth, async (req, res, next) => {
+  try { res.json({ requests: await requestsFor(req.user.id) }); } catch (error) { next(error); }
+});
+
+// Businesses the signed-in user can send requests to (never their own).
+app.get("/api/work/targets", auth, async (req, res, next) => {
+  try {
+    const links = await linkedWork(req.user.id);
+    res.json({
+      targets: links.map((l) => ({
+        business_id: l.business.business_id,
+        business_name: l.business.business_name || "Business",
+        role: l.role,
+        jobs: (l.ownerState.jobs || [])
+          .filter((j) => j?.business_id === l.business.business_id && (l.role === "employee" ? l.employeeIds.includes(j.employee_id) : l.customerIds.includes(j.customer_id)))
+          .map((j) => ({ job_id: j.job_id, title: j.title, status: j.status })),
+      })),
+    });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/work/requests", auth, async (req, res, next) => {
+  try {
+    const businessId = String(req.body?.businessId || "");
+    const kind = WORK_REQUEST_KINDS.has(req.body?.kind) ? req.body.kind : "Progress update";
+    const body = String(req.body?.body || "").trim().slice(0, 4000);
+    const amount = kind === "Money" ? Math.max(0, Number(req.body?.amount || 0)) : 0;
+    const jobId = String(req.body?.jobId || "");
+    const inputImages = Array.isArray(req.body?.images) ? req.body.images : [];
+    if (!body && !inputImages.length) return res.status(400).json({ error: "Add a message or at least one image." });
+    if (kind === "Money" && !(amount > 0)) return res.status(400).json({ error: "Enter the amount you are requesting." });
+    const links = (await linkedWork(req.user.id)).filter((l) => l.business.business_id === businessId);
+    const wantedRole = req.body?.role === "customer" ? "customer" : "employee";
+    const link = links.find((l) => l.role === wantedRole) || links[0];
+    if (!link) return res.status(403).json({ error: "You can only send requests to a business you work for or buy from." });
+    if (String(link.ownerId) === String(req.user.id)) return res.status(400).json({ error: "Requests go from an employee or customer to the business owner." });
+    const job = jobId
+      ? (link.ownerState.jobs || []).find((j) => j?.job_id === jobId && j.business_id === businessId && (link.role === "employee" ? link.employeeIds.includes(j.employee_id) : link.customerIds.includes(j.customer_id)))
+      : null;
+    if (jobId && !job) return res.status(403).json({ error: "That job is not linked to you." });
+    const requestId = randomUUID();
+    const images = await saveRequestImages(requestId, inputImages);
+    await pool.query(
+      `INSERT INTO work_requests (id, business_id, business_name, owner_user_id, from_user_id, from_role, job_id, job_title, kind, amount, body, images)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [requestId, businessId, link.business.business_name || "", link.ownerId, req.user.id, link.role, job?.job_id || "", job?.title || "", kind, amount, body, JSON.stringify(images)],
+    );
+    await pool.query(
+      "INSERT INTO app_notifications (user_id, title, body, href) VALUES ($1,$2,$3,$4)",
+      [link.ownerId, `${kind} from ${req.user.name}`, (job ? `${job.title}: ` : "") + (body || "Sent images"), "/requests"],
+    );
+    res.status(201).json({ requests: await requestsFor(req.user.id) });
+  } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.post("/api/work/requests/:requestId/messages", auth, async (req, res, next) => {
+  try {
+    const requestId = String(req.params.requestId || "");
+    if (!/^[0-9a-f-]{36}$/i.test(requestId)) return res.status(404).json({ error: "Request not found" });
+    const found = await pool.query("SELECT * FROM work_requests WHERE id=$1", [requestId]);
+    const request = found.rows[0];
+    const isOwner = request && String(request.owner_user_id) === String(req.user.id);
+    const isSender = request && String(request.from_user_id) === String(req.user.id);
+    if (!isOwner && !isSender) return res.status(404).json({ error: "Request not found" });
+    const body = String(req.body?.body || "").trim().slice(0, 4000);
+    const inputImages = Array.isArray(req.body?.images) ? req.body.images : [];
+    if (!body && !inputImages.length) return res.status(400).json({ error: "Add a message or at least one image." });
+    const images = await saveRequestImages(requestId, inputImages);
+    await pool.query("INSERT INTO work_request_messages (request_id, user_id, body, images) VALUES ($1,$2,$3,$4)", [requestId, req.user.id, body, JSON.stringify(images)]);
+    await pool.query("UPDATE work_requests SET updated_at=NOW() WHERE id=$1", [requestId]);
+    const other = isOwner ? request.from_user_id : request.owner_user_id;
+    await pool.query(
+      "INSERT INTO app_notifications (user_id, title, body, href) VALUES ($1,$2,$3,$4)",
+      [other, `New message from ${req.user.name}`, body || "Sent images", "/requests"],
+    );
+    res.status(201).json({ requests: await requestsFor(req.user.id) });
+  } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ error: error.message });
+    next(error);
+  }
+});
+
+app.patch("/api/work/requests/:requestId", auth, async (req, res, next) => {
+  try {
+    const requestId = String(req.params.requestId || "");
+    const status = String(req.body?.status || "");
+    if (!/^[0-9a-f-]{36}$/i.test(requestId)) return res.status(404).json({ error: "Request not found" });
+    if (!WORK_REQUEST_STATUSES.has(status) || status === "Pending") return res.status(400).json({ error: "Invalid status" });
+    const result = await pool.query(
+      "UPDATE work_requests SET status=$1, updated_at=NOW() WHERE id=$2 AND owner_user_id=$3 RETURNING *",
+      [status, requestId, req.user.id],
+    );
+    const request = result.rows[0];
+    if (!request) return res.status(404).json({ error: "Request not found" });
+    await pool.query(
+      "INSERT INTO app_notifications (user_id, title, body, href) VALUES ($1,$2,$3,$4)",
+      [request.from_user_id, `Request ${status.toLowerCase()}`, `${request.kind}${request.job_title ? ` · ${request.job_title}` : ""} was ${status.toLowerCase()} by ${req.user.name}.`, "/requests"],
+    );
+    res.json({ requests: await requestsFor(req.user.id) });
+  } catch (error) { next(error); }
+});
+
 app.use((error, _req, res, _next) => {
   console.error(error);
   res.status(500).json({ error: "Server error" });
 });
 
+async function runScheduledCollectionReminders() {
+  try {
+    const owners = await pool.query(
+      "SELECT user_id, state FROM user_state WHERE state ? 'collection_settings'"
+    );
+    const now = new Date();
+    const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    for (const owner of owners.rows) {
+      const state = owner.state || {};
+      const settings = state.collection_settings || {};
+      const channel = ["lifeboost", "whatsapp", "both"].includes(settings.channel) ? settings.channel : "lifeboost";
+      // WhatsApp needs a configured WhatsApp Business API/template. The manual Send action
+      // remains available for click-to-chat when that provider is not configured.
+      if (channel === "whatsapp") continue;
+      const timing = ["before", "due", "overdue"].includes(settings.timing) ? settings.timing : "before";
+      const days = Math.max(1, Math.min(30, Number(settings.days || 3)));
+      const customers = Array.isArray(state.customers) ? state.customers : [];
+      for (const customer of customers) {
+        if (!customer.user_id || Number(customer.amount || 0) <= 0 || !customer.due_date) continue;
+        const due = new Date(customer.due_date);
+        if (Number.isNaN(due.getTime())) continue;
+        const dueUtc = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
+        const diffDays = Math.round((dueUtc - todayUtc) / 86400000);
+        const matches = timing === "before" ? diffDays === days : timing === "due" ? diffDays === 0 : diffDays === -days;
+        if (!matches) continue;
+        const logged = await pool.query(
+          `INSERT INTO collection_reminder_log (owner_user_id, customer_id, due_date, timing, days)
+           VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING id`,
+          [owner.user_id, String(customer.customer_id), due.toISOString().slice(0, 10), timing, days],
+        );
+        if (!logged.rowCount) continue;
+        const message = `Hello ${String(customer.name || "Customer")}, this is a payment reminder for ${Number(customer.amount || 0).toFixed(2)}. Due date: ${due.toLocaleDateString()}. Please contact the business if you have already paid.`;
+        await pool.query(
+          "INSERT INTO app_notifications (user_id, title, body, href) VALUES ($1,$2,$3,$4)",
+          [customer.user_id, "Payment reminder", message, "/tab"],
+        );
+      }
+    }
+  } catch (error) {
+    console.error("Scheduled collection reminder failed:", error);
+  }
+}
+
 const schemaPath = path.join(__dirname, "schema.sql");
 const schema = fs.readFileSync(schemaPath, "utf8");
 pool.query(schema)
-  .then(() => app.listen(PORT, "0.0.0.0", () => console.log(`LifeBoost API running on http://localhost:${PORT}`)))
+  .then(() => {
+    app.listen(PORT, "0.0.0.0", () => console.log(`LifeBoost API running on http://localhost:${PORT}`));
+    void runScheduledCollectionReminders();
+    setInterval(() => void runScheduledCollectionReminders(), 15 * 60 * 1000);
+  })
   .catch((error) => { console.error("Database initialization failed", error); process.exit(1); });

@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { formatDate, money } from "@/lib/format";
+import { SearchFilter } from "@/components/search-filter";
 import { useLife } from "@/lib/store";
 import type { Invoice } from "@/lib/types";
 
@@ -30,6 +31,7 @@ function InvoicesPage() {
     useLife();
   const [open, setOpen] = useState(false);
   const [pay, setPay] = useState<Invoice | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (!can("manage_quotes")) {
     return <AccessDenied need="Invoices are for business owners." />;
@@ -44,11 +46,12 @@ function InvoicesPage() {
         actionLabel="Create invoice"
         onAction={() => setOpen(true)}
       />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search invoices…" />
       {businessInvoices.length === 0 ? (
         <EmptyState icon={CreditCard} text="No invoices yet." />
       ) : (
         <div className="flex flex-col gap-3">
-          {businessInvoices.map((inv) => (
+          {businessInvoices.filter((inv) => `${inv.invoice_id} ${inv.customer_name} ${inv.status}`.toLowerCase().includes(searchQuery.toLowerCase())).map((inv) => (
             <Card key={inv.invoice_id} className="p-5">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>

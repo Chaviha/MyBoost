@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { SearchFilter } from "@/components/search-filter";
 import { useLife } from "@/lib/store";
 import type { JobStatus } from "@/lib/types";
 
@@ -31,6 +32,7 @@ function JobsPage() {
   } = useLife();
   const [open, setOpen] = useState(false);
   const [usageJobId, setUsageJobId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (!can("manage_jobs")) {
     return <AccessDenied need="Assigning jobs is for business owners. Professionals use My jobs." />;
@@ -45,11 +47,12 @@ function JobsPage() {
         actionLabel="Assign job"
         onAction={() => setOpen(true)}
       />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search jobs…" />
       {businessJobs.length === 0 ? (
         <EmptyState icon={ClipboardList} text="No jobs assigned yet." />
       ) : (
         <div className="flex flex-col gap-3">
-          {businessJobs.map((job) => {
+          {businessJobs.filter((job) => `${job.title} ${job.description ?? ""} ${job.status} ${job.job_id}`.toLowerCase().includes(searchQuery.toLowerCase())).map((job) => {
             const emp = businessEmployees.find((e) => e.employee_id === job.employee_id);
             const customer = state.customers.find((c) => c.customer_id === job.customer_id);
             return (

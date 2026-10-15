@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { formatDate, money } from "@/lib/format";
+import { SearchFilter } from "@/components/search-filter";
 import { useLife } from "@/lib/store";
 
 export const Route = createFileRoute("/_app/expenses")({
@@ -26,6 +27,7 @@ export const Route = createFileRoute("/_app/expenses")({
 function ExpensesPage() {
   const { selectedBusiness, businessExpenses, addExpense, can } = useLife();
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (!can("manage_expenses")) {
     return <AccessDenied need="Business expenses are managed by the owner." />;
@@ -42,11 +44,12 @@ function ExpensesPage() {
         actionLabel="Add expense"
         onAction={() => setOpen(true)}
       />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search expenses…" />
       {businessExpenses.length === 0 ? (
         <EmptyState icon={Receipt} text="No expenses recorded." />
       ) : (
         <Card className="overflow-hidden p-0">
-          {businessExpenses.map((exp) => (
+          {businessExpenses.filter((exp) => `${exp.category} ${exp.description ?? ""} ${exp.expense_id}`.toLowerCase().includes(searchQuery.toLowerCase())).map((exp) => (
             <div
               key={exp.expense_id}
               className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 last:border-0"

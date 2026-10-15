@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ClipboardList, ListChecks, ShoppingCart } from "lucide-react";
+import { ClipboardList, ListChecks, Send, ShoppingCart } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { JobCard } from "@/components/job-card";
 import { PageHeader } from "@/components/page-header";
+import { SendRequestDialog } from "@/components/request-dialog";
 import { ChargeDialog, LedgerList, PaymentDialog } from "@/components/tab-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,8 +13,13 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDateTime, money } from "@/lib/format";
 import { chargeModeLabel } from "@/lib/roles";
+import { SearchFilter } from "@/components/search-filter";
 import { useLife } from "@/lib/store";
 import type { Customer, Quotation } from "@/lib/types";
+import { workApi, useWorkData, type WorkJob, type WorkTarget } from "@/lib/work-api";
+
+const NO_JOBS: WorkJob[] = [];
+const NO_TARGETS: WorkTarget[] = [];
 
 export const Route = createFileRoute("/_app/tab")({
   component: TabPage,
@@ -36,7 +42,6 @@ function TabPage() {
     canCharge,
     canPay,
     workspace,
-    myCustomerJobs,
     myCustomerSales,
     myCustomerQuotes,
     acceptQuotation,
@@ -45,6 +50,12 @@ function TabPage() {
   const [chargeFor, setChargeFor] = useState<Customer | null>(null);
   const [payFor, setPayFor] = useState<Customer | null>(null);
   const [busyQuote, setBusyQuote] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  // Jobs sit in the business owner's records, so a customer loads theirs from the server.
+  const jobsData = useWorkData(workApi.jobs, NO_JOBS);
+  const targets = useWorkData(workApi.targets, NO_TARGETS);
+  const [sendFor, setSendFor] = useState<WorkJob | null>(null);
+  const myCustomerJobs = jobsData.data.filter((j) => j.role === "customer");
 
   const productsFor = (customer: Customer) =>
     state.products.filter((p) => p.business_id === customer.business_id && p.status === "active");
@@ -86,6 +97,7 @@ function TabPage() {
         title="My tab"
         subtitle="Orders, quotations, jobs and payments at the shops that added you as a customer."
       />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search quotes, orders and payments…" />
       {myTabs.length === 0 ? (
         <EmptyState
           icon={ShoppingCart}
@@ -194,9 +206,17 @@ function TabPage() {
                 {myCustomerJobs.map((job) => (
                   <JobCard
                     key={job.job_id}
-                    job={job}
-                    shop={shopName(job.business_id)}
-                    overdue={+new Date(job.due_date) < +new Date("2026-08-31")}
+                    job={{ ...job, employee_id: "", customer_id: "" }}
+                    shop={job.business_name || shopName(job.business_id)}
+                    overdue={job.status !== "Completed" && +new Date(job.due_date) < Date.now()}
+                    actions={
+                      job.status !== "Completed" ? (
+                        <Button size="sm" variant="outline" onClick={() => setSendFor(job)}>
+                          <Send className="size-3.5" />
+                          Message owner
+                        </Button>
+                      ) : undefined
+                    }
                   />
                 ))}
               </div>
@@ -205,7 +225,7 @@ function TabPage() {
 
           <TabsContent value="payments">
             <div className="flex flex-col gap-4">
-              {myTabs.map((customer) => {
+              {myTabs.filter((customer) => `${customer.name} ${customer.phone} ${customer.customer_id}`.toLowerCase().includes(searchQuery.toLowerCase())).map((customer) => {
                 const shop = state.businesses.find((b) => b.business_id === customer.business_id);
                 return (
                   <Card key={customer.customer_id} className="overflow-hidden p-0">
@@ -246,6 +266,10 @@ function TabPage() {
                           <Button size="sm" variant="secondary" onClick={() => setPayFor(customer)}>
                             I paid
                           </Button>
+                        ) : customer.amount > 0 ? (
+                          <p className="text-sm text-ink-muted">
+                            Payments are recorded by the business. Ask them to allow payment updates if you want to log your own.
+                          </p>
                         ) : null}
                       </div>
                       <div className="mt-4">
@@ -263,23 +287,29 @@ function TabPage() {
       <ChargeDialog
         customer={chargeFor}
         products={chargeFor ? productsFor(chargeFor) : []}
+        open={Boolean(chargeFor)}
         onClose={() => setChargeFor(null)}
-        onSubmit={(payload) => {
-          if (!chargeFor) return;
-          addCustomerCharge(chargeFor.customer_id, payload);
+        onSubmit={(form) => {
+          addCustomerCharge(form);
           toast.success("Charge added to your tab.");
-          setChargeFor(null);
         }}
       />
       <PaymentDialog
         customer={payFor}
+        open={Boolean(payFor)}
         onClose={() => setPayFor(null)}
-        onSubmit={(amount, note) => {
-          if (!payFor) return;
-          recordCustomerPayment(payFor.customer_id, amount, note);
-          toast.success("Payment recorded.");
-          setPayFor(null);
+        onSubmit={(form) => {
+          recordCustomerPayment(form);
+          toast.success("Payment recorded. The business will see it shortly.");
         }}
+      />
+      <SendRequestDialog
+        open={Boolean(sendFor)}
+        onClose={() => setSendFor(null)}
+        targets={targets.data.filter((t) => t.role === "customer")}
+        businessId={sendFor?.business_id}
+        jobId={sendFor?.job_id}
+        defaultKind="Question"
       />
     </>
   );

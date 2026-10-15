@@ -140,6 +140,8 @@ export type Customer = {
   status: CustomerStatus;
   user_id: string;
   charge_mode: ChargeMode;
+  /** Owner-controlled permission for the linked customer to submit payment records. */
+  allow_customer_payments?: boolean;
 };
 
 export type LedgerEntry = {
@@ -156,6 +158,8 @@ export type LedgerEntry = {
   /** Optional source record for automatically generated financial entries. */
   reference_id?: string;
   reference_type?: "quotation" | "invoice" | "manual";
+  /** Present on payments a linked customer submitted through the server. */
+  via?: "customer-sync";
 };
 
 export type Employee = {
@@ -355,6 +359,9 @@ export type Job = {
   actual_resources?: JobResourceUsage[];
   variance_reason?: string;
   completed_at?: string;
+  /** Set when the status was last changed; lets owner and employee edits be reconciled. */
+  status_updated_at?: string;
+  status_updated_by?: string;
 };
 
 export type QuoteType = "general" | "steel" | "dxf_cut" | "concrete" | "custom_product";

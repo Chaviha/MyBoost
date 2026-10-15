@@ -451,6 +451,73 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     };
   }, [ready, authenticated]);
 
+  // ── Owner side: pick up what customers and employees changed on the server ──
+  // A linked customer's payment (and an employee's job status) is written to the owner's row by
+  // the API. The owner's open browser must merge it, or its next save would hide it again.
+  useEffect(() => {
+    if (!ready || !authenticated) return;
+    let cancelled = false;
+    const pullOwner = async () => {
+      try {
+        const res = await fetch("/api/state", { credentials: "include", cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const { state: remote } = (await res.json()) as { state: LifeState | null };
+        if (!remote || cancelled) return;
+        setState((prev) => {
+          const me = prev.currentUserId;
+          const ownedIds = new Set(prev.businesses.filter((b) => b.owner_user_id === me).map((b) => b.business_id));
+          if (ownedIds.size === 0) return prev;
+
+          const localEntryIds = new Set(prev.ledger.map((e) => e.entry_id));
+          const incoming = (remote.ledger || []).filter(
+            (e) => e.via === "customer-sync" && ownedIds.has(e.business_id) && !localEntryIds.has(e.entry_id),
+          );
+          let customers = prev.customers;
+          let ledger = prev.ledger;
+          if (incoming.length) {
+            ledger = [...incoming, ...prev.ledger];
+            for (const entry of incoming) {
+              customers = customers.map((c) => {
+                if (c.customer_id !== entry.customer_id) return c;
+                const nextAmount = Math.max(0, Number(c.amount || 0) - Number(entry.amount || 0));
+                return { ...c, amount: nextAmount, status: dueStatus(c.due_date, nextAmount) };
+              });
+            }
+          }
+
+          const remoteJobs = new Map((remote.jobs || []).map((j) => [j.job_id, j]));
+          let jobsChanged = false;
+          const jobs = prev.jobs.map((j) => {
+            const r = remoteJobs.get(j.job_id);
+            if (!r || !ownedIds.has(j.business_id) || !r.status_updated_by || r.status_updated_by === me) return j;
+            if (j.status_updated_at && j.status_updated_at >= (r.status_updated_at || "")) return j;
+            if (r.status === j.status) return j;
+            jobsChanged = true;
+            return { ...j, status: r.status, status_updated_at: r.status_updated_at, status_updated_by: r.status_updated_by };
+          });
+
+          if (!incoming.length && !jobsChanged) return prev;
+          return { ...prev, customers, ledger, jobs: jobsChanged ? jobs : prev.jobs };
+        });
+      } catch {
+        // Network blip; try again on the next tick.
+      }
+    };
+    void pullOwner();
+    const interval = window.setInterval(() => void pullOwner(), 15000);
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void pullOwner();
+    };
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [ready, authenticated]);
+
   const api = useMemo(() => {
     const currentUser =
       state.users.find((u) => u.user_id === state.currentUserId) ?? state.users[0] ?? guestUser;
@@ -1965,6 +2032,8 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           jobs: prev.jobs.map((j) => (j.job_id === jobId ? {
             ...j,
             status,
+            status_updated_at: new Date().toISOString(),
+            status_updated_by: prev.currentUserId,
             completed_at: status === "Completed" ? new Date().toISOString() : j.completed_at,
           } : j)),
         }));

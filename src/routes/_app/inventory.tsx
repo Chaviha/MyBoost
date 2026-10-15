@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Package } from "lucide-react";
+import { useState } from "react";
 import { AccessDenied } from "@/components/access-denied";
 import { Toolbar } from "@/components/app-shell";
 import { CatalogueSubnav } from "@/components/catalogue-subnav";
@@ -7,6 +8,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { money } from "@/lib/format";
+import { SearchFilter } from "@/components/search-filter";
 import { useLife } from "@/lib/store";
 
 export const Route = createFileRoute("/_app/inventory")({
@@ -15,6 +17,7 @@ export const Route = createFileRoute("/_app/inventory")({
 
 function InventoryPage() {
   const { selectedBusiness, businessProducts, can } = useLife();
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (!can("view_products")) {
     return <AccessDenied need="Inventory is for business owners." />;
@@ -24,6 +27,7 @@ function InventoryPage() {
   }
 
   const products = businessProducts ?? [];
+  const filteredProducts = products.filter((p) => `${p.name} ${p.sku ?? ""}`.toLowerCase().includes(searchQuery.toLowerCase()));
   const lowStock = products.filter((p) => (p.stock ?? 0) <= 5);
   const totalUnits = products.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
   const totalValue = products.reduce(
@@ -38,6 +42,7 @@ function InventoryPage() {
         subtitle={`Product stock for ${selectedBusiness.business_name}. Services have no stock. Adjust on Items · Product.`}
       />
       <CatalogueSubnav />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search stock items…" />
 
       {products.length === 0 ? (
         <EmptyState icon={Package} text="No products yet — add products to track inventory." />

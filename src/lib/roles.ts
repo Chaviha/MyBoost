@@ -157,5 +157,5 @@ export function canRecordPayment(opts: {
 }) {
   const { customer, user, isBusinessOwner } = opts;
   if (user.account_level === "admin" || isBusinessOwner) return true;
-  return Boolean(customer.user_id && customer.user_id === user.user_id);
+  return Boolean(customer.user_id && customer.user_id === user.user_id && customer.allow_customer_payments === true);
 }

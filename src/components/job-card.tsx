@@ -64,7 +64,8 @@ export function JobCard({
       </div>
       {job.description ? <p className="mt-2 text-sm text-ink-muted">{job.description}</p> : null}
       <p className="mt-2 text-xs text-ink-faint">
-        Due {formatDate(job.due_date)} · {money(job.estimated_cost)}
+        Due {formatDate(job.due_date)}
+        {job.estimated_cost > 0 ? ` · ${money(job.estimated_cost)}` : ""}
       </p>
       <JobProgress status={job.status} />
       {actions ? <div className="mt-3 flex flex-wrap gap-2">{actions}</div> : null}
