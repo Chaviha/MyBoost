@@ -177,6 +177,12 @@ export type Employee = {
   location: string;
   views: number;
   whatsapp_clicks: number;
+  /** Cover photo for marketplace / brochure */
+  image_url?: string;
+  /** Portfolio photos & short videos */
+  gallery?: MediaItem[];
+  /** Short bio / service description */
+  notes?: string;
 };
 
 export type Asset = {

@@ -57,10 +57,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadRoot = path.join(__dirname, "..", "uploads", "businesses");
 const assetUploadRoot = path.join(__dirname, "..", "uploads", "assets");
 const productUploadRoot = path.join(__dirname, "..", "uploads", "products");
+const employeeUploadRoot = path.join(__dirname, "..", "uploads", "employees");
 const avatarUploadRoot = path.join(__dirname, "..", "uploads", "avatars");
 fs.mkdirSync(uploadRoot, { recursive: true });
 fs.mkdirSync(assetUploadRoot, { recursive: true });
 fs.mkdirSync(productUploadRoot, { recursive: true });
+fs.mkdirSync(employeeUploadRoot, { recursive: true });
 fs.mkdirSync(avatarUploadRoot, { recursive: true });
 const PORT = Number(process.env.PORT || process.env.API_PORT || 3001);
 const SESSION_DAYS = 30;
@@ -332,6 +334,21 @@ async function productFromState(userId, productId) {
   return null;
 }
 
+
+async function employeeFromState(userId, employeeId) {
+  const result = await pool.query("SELECT state FROM user_state WHERE user_id = $1", [userId]);
+  const state = result.rows[0]?.state;
+  const employee = state?.employees?.find((e) => e.employee_id === employeeId);
+  if (!employee) return null;
+  const user = state?.users?.find((u) => u.user_id === userId);
+  const isAdmin = user?.account_level === "admin";
+  const ownsBusiness = employee.business_id
+    ? state?.businesses?.some((b) => b.business_id === employee.business_id && b.owner_user_id === userId)
+    : false;
+  if (isAdmin || ownsBusiness) return { state, employee };
+  return null;
+}
+
 async function assetFromState(userId, assetId) {
   const result = await pool.query("SELECT state FROM user_state WHERE user_id = $1", [userId]);
   const state = result.rows[0]?.state;
@@ -486,6 +503,72 @@ app.delete("/api/assets/:assetId/media/:mediaId", auth, async (req, res, next) =
 });
 
 
+
+app.post("/api/employees/:employeeId/media", auth, async (req, res, next) => {
+  try {
+    const employeeId = String(req.params.employeeId || "");
+    const access = await employeeFromState(req.user.id, employeeId);
+    if (!access) return res.status(403).json({ error: "You do not have permission to manage this professional" });
+    const parsed = parseMediaDataUrl(req.body.dataUrl);
+    if (!parsed) return res.status(400).json({ error: "Invalid file. Use JPG, PNG, WEBP or GIF images up to 6MB, or MP4/WEBM/MOV videos up to 40MB." });
+    const mediaId = crypto.randomUUID();
+    const filename = `${mediaId}.${parsed.ext}`;
+    const dir = path.join(employeeUploadRoot, employeeId);
+    const storageKey = `employees/${employeeId}/${filename}`;
+    const storedUrl = await saveUpload(storageKey, path.join(dir, filename), parsed.buffer, parsed.mime);
+    const media = {
+      media_id: mediaId,
+      ...(r2Enabled ? { storage_key: storageKey } : {}),
+      url: storedUrl || `/uploads/employees/${encodeURIComponent(employeeId)}/${filename}`,
+      name: safeFilename(req.body.name || filename),
+      media_type: parsed.media_type,
+      created_at: new Date().toISOString(),
+    };
+    const nextState = {
+      ...access.state,
+      employees: access.state.employees.map((e) =>
+        e.employee_id === employeeId
+          ? {
+              ...e,
+              gallery: [...(Array.isArray(e.gallery) ? e.gallery : []), media],
+              image_url: e.image_url || (media.media_type === "image" ? media.url : e.image_url),
+            }
+          : e,
+      ),
+    };
+    await pool.query(`INSERT INTO user_state (user_id, state) VALUES ($1,$2) ON CONFLICT (user_id) DO UPDATE SET state=EXCLUDED.state, updated_at=NOW()`, [req.user.id, JSON.stringify(nextState)]);
+    res.status(201).json({ media });
+  } catch (error) { next(error); }
+});
+
+app.delete("/api/employees/:employeeId/media/:mediaId", auth, async (req, res, next) => {
+  try {
+    const employeeId = String(req.params.employeeId || "");
+    const mediaId = String(req.params.mediaId || "");
+    const access = await employeeFromState(req.user.id, employeeId);
+    if (!access) return res.status(403).json({ error: "You do not have permission to manage this professional" });
+    const employee = access.employee;
+    const gallery = Array.isArray(employee.gallery) ? employee.gallery : [];
+    const media = gallery.find((item) => item.media_id === mediaId);
+    if (!media) return res.status(404).json({ error: "File not found" });
+    try {
+      const filePath = path.join(employeeUploadRoot, employeeId, path.basename(new URL(media.url, "http://local").pathname));
+      if (media.storage_key) await removeUpload(media.storage_key, filePath);
+      else if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (_) { /* ignore cleanup errors */ }
+    const remaining = gallery.filter((item) => item.media_id !== mediaId);
+    const image_url = remaining.find((item) => item.media_type === "image")?.url || "";
+    const nextState = {
+      ...access.state,
+      employees: access.state.employees.map((e) =>
+        e.employee_id === employeeId ? { ...e, gallery: remaining, image_url } : e,
+      ),
+    };
+    await pool.query(`UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2`, [JSON.stringify(nextState), req.user.id]);
+    res.json({ ok: true, image_url });
+  } catch (error) { next(error); }
+});
+
 app.post("/api/products/:productId/media", auth, async (req, res, next) => {
   try {
     const productId = String(req.params.productId || "");
@@ -592,6 +675,9 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
             role: employee.role,
             phone: employee.phone || "",
             location: employee.location || "",
+            notes: employee.notes || "",
+            image_url: employee.image_url || "",
+            gallery: Array.isArray(employee.gallery) ? employee.gallery : [],
             business_name: businessMap.get(employee.business_id),
             views: Number(employee.views || 0),
             whatsapp_clicks: Number(employee.whatsapp_clicks || 0),

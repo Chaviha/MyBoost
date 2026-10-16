@@ -10,7 +10,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
 import { ListingCover } from "@/components/listing-cover";
 import { ItemListBuilder } from "@/components/item-list-builder";
-import { MediaManagerDialog } from "@/components/media-manager";
+import { MediaManagerDialog, MediaPicker } from "@/components/media-manager";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -28,6 +28,7 @@ import {
   shareCatalogue,
 } from "@/lib/catalogue-pdf";
 import { money } from "@/lib/format";
+import type { StagedMedia } from "@/lib/media";
 import {
   downloadTextFile,
   parseProductSpreadsheet,
@@ -506,6 +507,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                       <p className="text-xs text-ink-muted">{p.stock} in stock</p>
                     </div>
                     <ProductMoreMenu
+                      isService={isService}
                       onEdit={() => {
                         const name = window.prompt("Product name", p.name);
                         if (name === null) return;
@@ -620,8 +622,17 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
             defaultCategoryId={activeCategoryId}
             itemKind={itemKind}
             onCancel={() => setOpen(false)}
-            onSubmit={(form) => {
-              addProduct({ ...form, itemKind });
+            onSubmit={async (form) => {
+              const productId = addProduct({ ...form, itemKind });
+              if (form.media?.length && productId) {
+                try {
+                  await uploadProductMedia(String(productId), form.media);
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Saved, but images failed to upload.");
+                  setOpen(false);
+                  return;
+                }
+              }
               toast.success(`${form.name} added.`);
               setOpen(false);
             }}
@@ -743,22 +754,24 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
 }
 
 function ProductMoreMenu({
+  isService = false,
   onEdit,
   onImages,
   onDelete,
 }: {
+  isService?: boolean;
   onEdit: () => void;
   onImages: () => void;
   onDelete: () => void;
 }) {
-  // Radix dropdown: closes on outside click, Escape, and after choosing an action.
+  const noun = isService ? "service" : "product";
   return (
     <MoreActions
-      label="More product actions"
+      label={`More ${noun} actions`}
       actions={[
-        { label: "Edit product", icon: <Pencil className="size-3.5" />, onSelect: onEdit },
+        { label: `Edit ${noun}`, icon: <Pencil className="size-3.5" />, onSelect: onEdit },
         { label: "Manage images", icon: <ImagePlus className="size-3.5" />, onSelect: onImages },
-        { label: "Delete product", icon: <Trash2 className="size-3.5" />, destructive: true, onSelect: onDelete },
+        { label: `Delete ${noun}`, icon: <Trash2 className="size-3.5" />, destructive: true, onSelect: onDelete },
       ]}
     />
   );
@@ -792,7 +805,8 @@ function ProductForm({
     description: string;
     specs: SpecValues;
     family: string;
-  }) => void;
+    media: StagedMedia[];
+  }) => void | Promise<void>;
 }) {
   const [categoryId, setCategoryId] = useState(defaultCategoryId || "");
   const [form, setForm] = useState({
@@ -807,20 +821,28 @@ function ProductForm({
     family: "",
   });
   const [specs, setSpecs] = useState<SpecValues>({});
+  const [media, setMedia] = useState<StagedMedia[]>([]);
+  const [saving, setSaving] = useState(false);
   const defs = categoryId ? specsByCategory.get(categoryId) || [] : [];
 
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
         if (!form.name || !form.sellingPrice) return;
         const cat = categories.find((c) => c.category_id === categoryId);
-        onSubmit({
-          ...form,
-          category: cat?.name || form.category,
-          categoryId,
-          specs,
-        });
+        setSaving(true);
+        try {
+          await onSubmit({
+            ...form,
+            category: cat?.name || form.category,
+            categoryId,
+            specs,
+            media,
+          });
+        } finally {
+          setSaving(false);
+        }
       }}
     >
       <Field label={itemKind === "service" ? "Service name" : "Product name"}>
@@ -936,6 +958,13 @@ function ProductForm({
       ) : (
         <p className="mb-3 text-xs text-ink-muted">Services do not track stock quantity.</p>
       )}
+      <MediaPicker
+        label={itemKind === "service" ? "Service photos & videos" : "Product photos & videos"}
+        hint="First photo becomes the cover. Up to 10 files — images up to 6MB, videos up to 40MB."
+        value={media}
+        onChange={setMedia}
+      />
+
       <div className="mt-4 flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel

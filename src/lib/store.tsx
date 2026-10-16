@@ -1049,6 +1049,51 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           ),
         }));
       },
+      uploadEmployeeMedia: async (employeeId, files) => {
+        for (const file of files) {
+          const response = await fetch(`/api/employees/${encodeURIComponent(employeeId)}/media`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ name: file.name, dataUrl: file.dataUrl }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "Unable to upload professional media");
+          const media = payload.media as MediaItem;
+          setState((prev) => ({
+            ...prev,
+            employees: prev.employees.map((e) => {
+              if (e.employee_id !== employeeId) return e;
+              const gallery = Array.isArray(e.gallery) ? e.gallery : [];
+              return {
+                ...e,
+                image_url: e.image_url || (media.media_type === "image" ? media.url : e.image_url),
+                gallery: [...gallery, media],
+              };
+            }),
+          }));
+        }
+      },
+      removeEmployeeMedia: async (employeeId, mediaId) => {
+        const response = await fetch(`/api/employees/${encodeURIComponent(employeeId)}/media/${encodeURIComponent(mediaId)}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Unable to remove professional media");
+        setState((prev) => ({
+          ...prev,
+          employees: prev.employees.map((e) =>
+            e.employee_id === employeeId
+              ? {
+                  ...e,
+                  image_url: payload.image_url ?? e.image_url,
+                  gallery: (e.gallery || []).filter((media) => media.media_id !== mediaId),
+                }
+              : e,
+          ),
+        }));
+      },
       addCustomer: async (form) => {
         const opening = Number(form.amount || 0);
         const customer_id = uid("CUS");
@@ -1254,6 +1299,9 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               location: form.location || "",
               views: 0,
               whatsapp_clicks: 0,
+              image_url: "",
+              gallery: [],
+              notes: form.notes || "",
             },
           ],
         };
@@ -1266,6 +1314,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({ state: nextState }),
         });
         if (!response.ok) throw new Error("Unable to save employee");
+        return employee_id;
       },
       addSale: (form) => {
         setState((prev) => ({
@@ -1441,12 +1490,13 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         family?: string;
         itemKind?: "product" | "service";
       }) => {
+        const product_id = uid("PRD");
         setState((prev) => ({
           ...prev,
           products: [
             ...prev.products,
             {
-              product_id: uid("PRD"),
+              product_id,
               business_id: prev.selectedBusinessId,
               name: form.name,
               item_kind: form.itemKind === "service" ? "service" : "product",
@@ -1470,6 +1520,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
             },
           ],
         }));
+        return product_id;
       },
       /** Bulk-add products from CSV/Excel import (same business). */
       importProducts: (

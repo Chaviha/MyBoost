@@ -202,13 +202,25 @@ function MarketplacePage() {
               {pros.map((p) => (
                 <Card
                   key={p.employee_id}
-                  className="p-5"
+                  className="overflow-hidden p-0"
                   onMouseEnter={() => once(`p:${p.employee_id}`, () => viewProfessional(p.employee_id))}
                 >
-                  <div className="mb-3 flex items-start justify-between gap-3">
-                    <div className="flex size-12 items-center justify-center rounded-lg bg-leaf font-display text-lg font-medium text-forest">
-                      {initials(p.name)}
+                  {(p as { image_url?: string }).image_url ? (
+                    <ListingCover
+                      src={(p as { image_url?: string }).image_url}
+                      alt={p.name}
+                      type="Other"
+                      className="h-36"
+                    />
+                  ) : (
+                    <div className="flex h-36 items-center justify-center bg-leaf">
+                      <div className="flex size-16 items-center justify-center rounded-full bg-paper font-display text-2xl font-medium text-forest">
+                        {initials(p.name)}
+                      </div>
                     </div>
+                  )}
+                  <div className="p-5">
+                  <div className="mb-2 flex items-start justify-between gap-3">
                     <Badge tone="amber">Professional</Badge>
                   </div>
                   <h3 className="font-display text-xl font-medium tracking-tight">{p.name}</h3>
@@ -240,6 +252,7 @@ function MarketplacePage() {
                     <MessageCircle className="size-4" />
                     Contact on WhatsApp
                   </Button>
+                  </div>
                 </Card>
               ))}
             </div>
