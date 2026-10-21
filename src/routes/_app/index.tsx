@@ -23,7 +23,7 @@ function OverviewPage() {
     <>
       <PageHeader
         eyebrow={`Good to see you, ${firstName(currentUser.name)}`}
-        title="LifeBoost"
+        title="LifeBoostSME"
         subtitle="Your real financial growth, opportunities, assistant, and marketplace — without demo data."
       />
       <div className="grid gap-4 lg:grid-cols-5">
