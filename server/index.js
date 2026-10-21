@@ -86,7 +86,7 @@ const app = express();
 app.use(express.json({ limit: "60mb" }));
 app.use(cookieParser());
 
-const cookieName = process.env.SESSION_COOKIE_NAME || "lifeboost_session";
+const cookieName = process.env.SESSION_COOKIE_NAME || "lifeBoostSME_session";
 const isProduction = process.env.NODE_ENV === "production";
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const randomToken = () => crypto.randomBytes(32).toString("base64url");
@@ -229,11 +229,11 @@ app.post("/api/auth/forgot-password", async (req, res, next) => {
       // client is the same either way to avoid leaking whether the email exists.
       try {
         await mailer.sendMail({
-          from: process.env.SMTP_FROM || "LifeBoost <no-reply@lifeboost.ke>",
+          from: process.env.SMTP_FROM || "lifeBoostSME <no-reply@lifeBoostSME.ke>",
           to: email,
-          subject: "Reset your LifeBoost password",
-          text: `Reset your LifeBoost password using this link. It expires in ${RESET_MINUTES} minutes: ${resetUrl}`,
-          html: `<p>Reset your LifeBoost password.</p><p><a href="${resetUrl}">Reset password</a></p><p>This link expires in ${RESET_MINUTES} minutes and can only be used once.</p>`,
+          subject: "Reset your lifeBoostSME password",
+          text: `Reset your lifeBoostSME password using this link. It expires in ${RESET_MINUTES} minutes: ${resetUrl}`,
+          html: `<p>Reset your lifeBoostSME password.</p><p><a href="${resetUrl}">Reset password</a></p><p>This link expires in ${RESET_MINUTES} minutes and can only be used once.</p>`,
         });
         emailSent = true;
       } catch (sendError) {
@@ -947,7 +947,7 @@ app.post("/api/public/quote/:token/email", async (req, res, next) => {
       });
     }
     await mailer.sendMail({
-      from: process.env.SMTP_FROM || "LifeBoost <no-reply@lifeboost.ke>",
+      from: process.env.SMTP_FROM || "lifeBoostSME <no-reply@lifeBoostSME.ke>",
       to,
       subject: `Quotation from ${biz} — please review`,
       text: `Hello ${found.quote.customer_name},\n\n${biz} sent you a quotation totaling KSh ${total}.\n\nReview and accept or reject here:\n${link}\n\nThank you.`,
@@ -1012,14 +1012,14 @@ app.post("/api/relationships/invite", auth, async (req, res, next) => {
     );
     const targetUser = targetResult.rows[0];
 
-    // The person may not have created a LifeBoost account yet. Do not create
+    // The person may not have created a lifeBoostSME account yet. Do not create
     // a fake user in the owner's JSON blob; the invite can simply be retried
     // after the person registers.
     if (!targetUser) {
       return res.json({
         linked: false,
         userId: "",
-        message: "No active LifeBoost account exists for that email yet.",
+        message: "No active lifeBoostSME account exists for that email yet.",
       });
     }
 
@@ -1112,7 +1112,7 @@ app.post("/api/relationships/invite", auth, async (req, res, next) => {
       userId: targetUser.id,
       relationshipId,
       offerId,
-      message: "Invitation and offer delivered to the user's LifeBoost account.",
+      message: "Invitation and offer delivered to the user's lifeBoostSME account.",
     });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -1217,13 +1217,13 @@ app.post("/api/relationships/respond", auth, async (req, res, next) => {
 app.get("/api/collections/settings", auth, async (req, res, next) => {
   try {
     const result = await pool.query("SELECT state->'collection_settings' AS settings FROM user_state WHERE user_id=$1", [req.user.id]);
-    res.json({ settings: result.rows[0]?.settings || { channel: "lifeboost", timing: "before", days: 3 } });
+    res.json({ settings: result.rows[0]?.settings || { channel: "lifeBoostSME", timing: "before", days: 3 } });
   } catch (error) { next(error); }
 });
 
 app.put("/api/collections/settings", auth, async (req, res, next) => {
   try {
-    const channel = ["lifeboost", "whatsapp", "both"].includes(String(req.body?.channel)) ? String(req.body.channel) : "lifeboost";
+    const channel = ["lifeBoostSME", "whatsapp", "both"].includes(String(req.body?.channel)) ? String(req.body.channel) : "lifeBoostSME";
     const timing = ["before", "due", "overdue"].includes(String(req.body?.timing)) ? String(req.body.timing) : "before";
     const days = Math.max(1, Math.min(30, Number(req.body?.days || 3)));
     const settings = { channel, timing, days };
@@ -1255,15 +1255,15 @@ app.post("/api/collections/:customerId/remind", auth, async (req, res, next) => 
       String(business.business_id) === String(customer.business_id) && String(business.owner_user_id || req.user.id) === String(req.user.id)
     );
     if (!customer || !ownsBusiness) return res.status(404).json({ error: "Customer not found in your business." });
-    const channel = ["lifeboost", "whatsapp", "both"].includes(String(req.body?.channel)) ? String(req.body.channel) : "lifeboost";
-    if ((channel === "lifeboost" || channel === "both") && !customer.user_id) {
-      return res.status(400).json({ error: "Link this customer to a LifeBoost account to send an in-app notification. WhatsApp-only reminders do not require an account." });
+    const channel = ["lifeBoostSME", "whatsapp", "both"].includes(String(req.body?.channel)) ? String(req.body.channel) : "lifeBoostSME";
+    if ((channel === "lifeBoostSME" || channel === "both") && !customer.user_id) {
+      return res.status(400).json({ error: "Link this customer to a lifeBoostSME account to send an in-app notification. WhatsApp-only reminders do not require an account." });
     }
     const amount = Number(customer.amount || 0);
     const dueDate = customer.due_date ? new Date(customer.due_date).toLocaleDateString() : "the agreed date";
     const message = `Hello ${String(customer.name || "Customer")}, this is a payment reminder for ${amount.toFixed(2)}. Due date: ${dueDate}. Please contact the business if you have already paid.`;
     let notificationCreated = false;
-    if (channel === "lifeboost" || channel === "both") {
+    if (channel === "lifeBoostSME" || channel === "both") {
       await pool.query(
         "INSERT INTO app_notifications (user_id, title, body, href) VALUES ($1,$2,$3,$4)",
         [customer.user_id, "Payment reminder", message, "/tab"],
@@ -1284,7 +1284,7 @@ app.post("/api/collections/:customerId/remind", auth, async (req, res, next) => 
 });
 
 // Shared Meetings & Discussions. Meetings live in their own tables so invited
-// participants can see the same meeting even though LifeBoost business data
+// participants can see the same meeting even though lifeBoostSME business data
 // remains in each user's private state JSON.
 async function canAccessMeeting(meetingId, userId) {
   const result = await pool.query(
@@ -1358,7 +1358,7 @@ app.post("/api/meetings", auth, async (req, res, next) => {
     const foundEmails = new Set(found.map((u) => String(u.email).toLowerCase()));
     const missing = emails.filter((email) => !foundEmails.has(email));
     if (missing.length) {
-      return res.status(400).json({ error: `These emails are not registered LifeBoost accounts: ${missing.join(", ")}` });
+      return res.status(400).json({ error: `These emails are not registered lifeBoostSME accounts: ${missing.join(", ")}` });
     }
 
     const participantIds = found
@@ -1366,7 +1366,7 @@ app.post("/api/meetings", auth, async (req, res, next) => {
       .filter((id) => id !== String(req.user.id));
 
     const meetingId = randomUUID();
-    const meetingUrl = `https://meet.jit.si/LifeBoost-${meetingId.replaceAll("-", "")}`;
+    const meetingUrl = `https://meet.jit.si/lifeBoostSME-${meetingId.replaceAll("-", "")}`;
     const result = await pool.query(
       `INSERT INTO meetings
        (id, organizer_user_id, title, agenda, start_at, duration_minutes, meeting_url, participant_user_ids)
@@ -1502,7 +1502,7 @@ app.post("/api/ai/quote-assist", auth, async (req, res) => {
     const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-4o-mini", messages: [{ role: "system", content: "You are LifeBoost's careful fabrication quotation assistant. Be practical, clear and safety-conscious. Never invent prices or imply a quote is saved." }, { role: "user", content }], temperature: 0.2, max_tokens: 1400 })
+      body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-4o-mini", messages: [{ role: "system", content: "You are lifeBoostSME's careful fabrication quotation assistant. Be practical, clear and safety-conscious. Never invent prices or imply a quote is saved." }, { role: "user", content }], temperature: 0.2, max_tokens: 1400 })
     });
     const payload = await aiResponse.json().catch(() => ({}));
     if (!aiResponse.ok) {
@@ -2118,7 +2118,7 @@ async function runScheduledCollectionReminders() {
     for (const owner of owners.rows) {
       const state = owner.state || {};
       const settings = state.collection_settings || {};
-      const channel = ["lifeboost", "whatsapp", "both"].includes(settings.channel) ? settings.channel : "lifeboost";
+      const channel = ["lifeBoostSME", "whatsapp", "both"].includes(settings.channel) ? settings.channel : "lifeBoostSME";
       // WhatsApp needs a configured WhatsApp Business API/template. The manual Send action
       // remains available for click-to-chat when that provider is not configured.
       if (channel === "whatsapp") continue;
@@ -2155,7 +2155,7 @@ const schemaPath = path.join(__dirname, "schema.sql");
 const schema = fs.readFileSync(schemaPath, "utf8");
 pool.query(schema)
   .then(() => {
-    app.listen(PORT, "0.0.0.0", () => console.log(`LifeBoost API running on http://localhost:${PORT}`));
+    app.listen(PORT, "0.0.0.0", () => console.log(`lifeBoostSME API running on http://localhost:${PORT}`));
     void runScheduledCollectionReminders();
     setInterval(() => void runScheduledCollectionReminders(), 15 * 60 * 1000);
   })
