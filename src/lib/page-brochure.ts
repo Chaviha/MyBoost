@@ -75,10 +75,45 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+
+/** Resize images before embedding them so large brochures use far less memory. */
+async function compressImageToDataUrl(source: Blob | string): Promise<string> {
+  const objectUrl = typeof source === "string" ? source : URL.createObjectURL(source);
+  const shouldRevoke = typeof source !== "string";
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const width = img.naturalWidth || img.width;
+          const height = img.naturalHeight || img.height;
+          if (!width || !height) return reject(new Error("Image has no dimensions"));
+          const scale = Math.min(1, 1400 / Math.max(width, height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(width * scale));
+          canvas.height = Math.max(1, Math.round(height * scale));
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return reject(new Error("Could not prepare image"));
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", 0.78));
+        } catch (error) {
+          reject(error);
+        }
+      };
+      img.onerror = () => reject(new Error("Could not load image"));
+      img.src = objectUrl;
+    });
+  } finally {
+    if (shouldRevoke) URL.revokeObjectURL(objectUrl);
+  }
+}
+
 async function tryInlineImage(url: string): Promise<string> {
   const abs = resolveMediaUrl(url);
   if (!abs) return "";
-  if (/^data:image\//i.test(abs)) return abs;
+  if (/^data:image\//i.test(abs)) {
+    try { return await compressImageToDataUrl(abs); } catch { return abs; }
+  }
 
   // Prefer fetch against app origin (uses Vite /uploads proxy in dev)
   for (const creds of ["include", "omit"] as const) {
@@ -95,11 +130,10 @@ async function tryInlineImage(url: string): Promise<string> {
       if (type.includes("text/html") || type.includes("application/json")) continue;
       if (blob.size < 32) continue;
       if (type.startsWith("image/") || type === "" || type === "application/octet-stream") {
-        const data = await blobToDataUrl(
-          type.startsWith("image/")
-            ? blob
-            : new Blob([blob], { type: "image/jpeg" }),
-        );
+        const imageBlob = type.startsWith("image/")
+          ? blob
+          : new Blob([blob], { type: "image/jpeg" });
+        const data = await compressImageToDataUrl(imageBlob);
         if (data.startsWith("data:")) return data;
       }
     } catch {
@@ -107,37 +141,12 @@ async function tryInlineImage(url: string): Promise<string> {
     }
   }
 
-  // Canvas fallback (needs CORS on the image response)
+  // Fallback for URLs that cannot be fetched as blobs (requires CORS permission).
   try {
-    const data = await new Promise<string>((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        try {
-          const c = document.createElement("canvas");
-          c.width = img.naturalWidth || img.width;
-          c.height = img.naturalHeight || img.height;
-          if (!c.width || !c.height) {
-            reject(new Error("empty"));
-            return;
-          }
-          const ctx = c.getContext("2d");
-          if (!ctx) {
-            reject(new Error("no ctx"));
-            return;
-          }
-          ctx.drawImage(img, 0, 0);
-          resolve(c.toDataURL("image/jpeg", 0.9));
-        } catch (e) {
-          reject(e);
-        }
-      };
-      img.onerror = () => reject(new Error("img error"));
-      img.src = abs;
-    });
+    const data = await compressImageToDataUrl(abs);
     if (data.startsWith("data:")) return data;
   } catch {
-    /* use absolute */
+    /* use absolute URL when browser security prevents inlining */
   }
 
   return abs;
@@ -181,12 +190,19 @@ export async function prepareItemsForBrochure(
     };
 
     const galleryIn = Array.isArray(item.gallery) ? item.gallery : [];
+    let inlineImageCount = 0;
     const gallery = await mapPool(galleryIn, 2, async (m) => {
       const video =
         m.media_type === "video" || /\.(mp4|webm|mov)(\?|$)/i.test(m.url || "");
+      // Only embed photos that can appear in the brochure's 8-photo layout.
+      const embedThisImage = !video && inline && inlineImageCount++ < 8;
       return {
         ...m,
-        url: await fixUrl(m.url, video),
+        url: video
+          ? resolveMediaUrl(m.url)
+          : embedThisImage
+            ? await tryInlineImage(m.url)
+            : resolveMediaUrl(m.url),
         media_type: video ? "video" : m.media_type || "image",
       };
     });
@@ -506,5 +522,6 @@ export async function downloadPageBrochure(
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  // Give the browser time to start the download before releasing the URL.
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
