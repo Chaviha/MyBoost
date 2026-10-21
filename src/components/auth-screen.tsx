@@ -30,7 +30,7 @@ export function AuthScreen() {
       } else if (mode === "register") {
         if (form.password !== form.confirm) throw new Error("Passwords do not match");
         await register(form);
-        toast.success("Your LifeBoost account is ready.");
+        toast.success("Your LifeBoostSME account is ready.");
       } else if (mode === "forgot") {
         const result = await requestPasswordReset(form.email);
         if (result.resetUrl) toast.success("Reset link generated for local development.");
@@ -57,7 +57,7 @@ export function AuthScreen() {
         <Card className="w-full p-6 sm:p-8">
           <div className="mb-7 flex items-center gap-3">
             <BoostMark />
-            <div><p className="font-display text-xl font-semibold">LifeBoost</p><p className="text-xs text-ink-muted">One app for work and money</p></div>
+            <div><p className="font-display text-xl font-semibold">LifeBoostSME</p><p className="text-xs text-ink-muted">One app for work and money</p></div>
           </div>
           <h1 className="font-display text-3xl font-medium tracking-tight">{title}</h1>
           <p className="mt-1 text-sm text-ink-muted">Your account and business data are stored securely in PostgreSQL.</p>
