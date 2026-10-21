@@ -73,7 +73,7 @@ const QUOTE_TYPES: { value: QuoteType; label: string; blurb: string }[] = [
   {
     value: "custom_product",
     label: "Materials & Products",
-    blurb: "Search products across LifeBoost — steel, agriculture, construction & more",
+    blurb: "Search products across lifeBoostSME — steel, agriculture, construction & more",
   },
 ];
 
@@ -715,7 +715,7 @@ function QuotationsPage() {
                 addQuotation(form);
                 toast.success(
                   cust.user_id
-                    ? `Quotation sent to ${cust.name} — it will appear in their LifeBoost account.`
+                    ? `Quotation sent to ${cust.name} — it will appear in their lifeBoostSME account.`
                     : `Quotation saved for ${cust.name} — share the review link, WhatsApp, or email.`,
                 );
               }
@@ -906,7 +906,7 @@ function QuoteWizard({
               <option key={c.customer_id} value={c.customer_id}>
                 {c.name}
                 {c.email ? ` · ${c.email}` : ""}
-                {c.user_id ? " · LifeBoost" : ""}
+                {c.user_id ? " · lifeBoostSME" : ""}
               </option>
             ))}
         </Select>
@@ -914,8 +914,8 @@ function QuoteWizard({
           <p className="mt-1 text-xs text-ink-muted">
             Quote will be sent to this customer
             {customers.find((c) => c.customer_id === customerId)?.user_id
-              ? " (appears in their LifeBoost account)"
-              : " (share link / WhatsApp / email — no LifeBoost account linked yet)"}
+              ? " (appears in their lifeBoostSME account)"
+              : " (share link / WhatsApp / email — no lifeBoostSME account linked yet)"}
             .
           </p>
         ) : null}
@@ -1997,7 +1997,7 @@ function SteelBuilder({
     <Card className="mb-4 p-4">
       <p className="mb-3 text-sm font-medium">Steel & materials calculator</p>
       <p className="mb-3 text-xs text-ink-muted">
-        Enter the <span className="font-medium text-ink">finished size</span>. For standard sections such as RHS, SHS, angles, I-beams and channels, LifeBoost uses the catalogue <span className="font-medium text-ink">kg/m</span> reference when available, then applies the exact cut length and quantity.
+        Enter the <span className="font-medium text-ink">finished size</span>. For standard sections such as RHS, SHS, angles, I-beams and channels, lifeBoostSME uses the catalogue <span className="font-medium text-ink">kg/m</span> reference when available, then applies the exact cut length and quantity.
       </p>
       <div className="mb-3 grid gap-3 sm:grid-cols-2">
         <Field label="Category">
