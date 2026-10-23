@@ -76,6 +76,28 @@ const mailer = process.env.SMTP_HOST
     })
   : null;
 
+// Railway disables outbound SMTP on Free/Trial/Hobby plans, so SMTP alone silently fails there.
+// When RESEND_API_KEY is set, mail goes out over HTTPS (works on every plan); SMTP stays as the fallback.
+const mailEnabled = Boolean(process.env.RESEND_API_KEY || mailer);
+async function sendMail(message) {
+  if (process.env.RESEND_API_KEY) {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: process.env.RESEND_FROM || message.from,
+        to: [message.to],
+        subject: message.subject,
+        text: message.text,
+        html: message.html,
+      }),
+    });
+    if (!response.ok) throw new Error(`Resend ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    return;
+  }
+  await mailer.sendMail(message);
+}
+
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is required. Copy .env.example to .env and configure PostgreSQL.");
   process.exit(1);
@@ -223,12 +245,12 @@ app.post("/api/auth/forgot-password", async (req, res, next) => {
     const base = process.env.APP_URL || `http://localhost:8080`;
     const resetUrl = `${base}/?reset=${encodeURIComponent(raw)}`;
     let emailSent = false;
-    if (mailer) {
-      // A broken SMTP provider (bad creds, blocked port, etc.) must not fail the
+    if (mailEnabled) {
+      // A broken mail provider (bad creds, blocked port, etc.) must not fail the
       // whole request — the token is already issued, and the response to the
       // client is the same either way to avoid leaking whether the email exists.
       try {
-        await mailer.sendMail({
+        await sendMail({
           from: process.env.SMTP_FROM || "lifeBoostSME <no-reply@lifeBoostSME.ke>",
           to: email,
           subject: "Reset your lifeBoostSME password",
@@ -238,14 +260,16 @@ app.post("/api/auth/forgot-password", async (req, res, next) => {
         emailSent = true;
       } catch (sendError) {
         console.error(`Failed to send password reset email to ${email}:`, sendError.message || sendError);
+        // Never leave the user with nothing: the link is still logged so you can send it by hand while fixing email.
+        console.log(`Password reset link for ${email} (email failed): ${resetUrl}`);
       }
     } else {
       // Most common cause of "reset emails never arrive": SMTP_HOST/PORT/USER/PASSWORD
       // were never set on this deployment. Always log this — not just outside
       // production — so it shows up in Railway logs instead of failing silently.
       console.warn(
-        "Password reset requested but SMTP is not configured (SMTP_HOST is unset) — no email was sent. " +
-          "Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD and SMTP_FROM to enable email delivery.",
+        "Password reset requested but no email provider is configured — no email was sent. " +
+          "Set RESEND_API_KEY (+ RESEND_FROM), or SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD/SMTP_FROM (SMTP is blocked on Railway Hobby).",
       );
     }
     if (!emailSent && (!isProduction || process.env.LOG_RESET_LINKS === "true")) {
@@ -940,13 +964,13 @@ app.post("/api/public/quote/:token/email", async (req, res, next) => {
       : `/quote/${encodeURIComponent(req.params.token)}`;
     const biz = found.business?.business_name || "Business";
     const total = Number(found.quote.total || 0).toLocaleString("en-KE");
-    if (!mailer) {
+    if (!mailEnabled) {
       return res.status(503).json({
-        error: "Email is not configured (set SMTP_HOST). Use WhatsApp or copy link instead.",
+        error: "Email is not configured (set RESEND_API_KEY or SMTP_HOST). Use WhatsApp or copy link instead.",
         link,
       });
     }
-    await mailer.sendMail({
+    await sendMail({
       from: process.env.SMTP_FROM || "lifeBoostSME <no-reply@lifeBoostSME.ke>",
       to,
       subject: `Quotation from ${biz} — please review`,
@@ -1543,27 +1567,28 @@ app.post("/api/customers/payment-sync", auth, async (req, res, next) => {
     const relationships = Array.isArray(customerState.relationships) ? customerState.relationships : [];
     const businesses = Array.isArray(customerState.businesses) ? customerState.businesses : [];
     let applied = 0;
+    const skipped = []; // why a payment was NOT applied, so the client can tell the customer instead of pretending it worked
     for (const payment of payments) {
       const businessId = String(payment?.business_id || "");
       const entryId = String(payment?.entry_id || "");
       const amount = Number(payment?.amount);
-      if (!businessId || !entryId || payment?.type !== "payment" || String(payment?.posted_by) !== String(req.user.id) || !Number.isFinite(amount) || amount <= 0) continue;
+      if (!businessId || !entryId || payment?.type !== "payment" || String(payment?.posted_by) !== String(req.user.id) || !Number.isFinite(amount) || amount <= 0) { skipped.push({ entry_id: entryId, reason: "invalid" }); continue; }
       const relationship = relationships.find((r) => r?.business_id === businessId && r?.relationship_type === "customer" && String(r?.status || "").toLowerCase() === "active");
       const business = businesses.find((b) => b?.business_id === businessId && b?.owner_user_id);
-      if (!relationship || !business) continue;
+      if (!relationship || !business) { skipped.push({ entry_id: entryId, reason: "not_linked" }); continue; }
       const ownerId = String(business.owner_user_id);
       const ownerRow = await client.query("SELECT state FROM user_state WHERE user_id = $1 FOR UPDATE", [ownerId]);
       const ownerState = ownerRow.rows[0]?.state;
-      if (!ownerState) continue;
+      if (!ownerState) { skipped.push({ entry_id: entryId, reason: "not_linked" }); continue; }
       const ownerCustomers = Array.isArray(ownerState.customers) ? ownerState.customers : [];
       const tabIndex = ownerCustomers.findIndex((c) => c?.business_id === businessId && String(c?.user_id) === String(req.user.id));
-      if (tabIndex < 0) continue;
+      if (tabIndex < 0) { skipped.push({ entry_id: entryId, reason: "not_linked" }); continue; }
       const ownerTab = ownerCustomers[tabIndex];
-      if (ownerTab.allow_customer_payments !== true) continue; // owner has not enabled customer payment updates
+      if (ownerTab.allow_customer_payments !== true) { skipped.push({ entry_id: entryId, reason: "payments_disabled" }); continue; } // owner has not enabled customer payment updates
       ownerState.ledger = Array.isArray(ownerState.ledger) ? ownerState.ledger : [];
-      if (ownerState.ledger.some((e) => e?.entry_id === entryId)) continue;
+      if (ownerState.ledger.some((e) => e?.entry_id === entryId)) { skipped.push({ entry_id: entryId, reason: "duplicate" }); continue; }
       const paid = Math.min(Number(ownerTab.amount || 0), amount);
-      if (paid <= 0) continue;
+      if (paid <= 0) { skipped.push({ entry_id: entryId, reason: "no_balance" }); continue; }
       const nextAmount = Math.max(0, Number(ownerTab.amount || 0) - paid);
       const dueDate = String(ownerTab.due_date || "");
       const status = nextAmount <= 0 ? "Paid" : dueDate && new Date(dueDate) < new Date() ? "Overdue" : dueDate && (new Date(dueDate).getTime() - Date.now()) <= 7 * 86400000 ? "Due soon" : "Pending";
@@ -1581,7 +1606,7 @@ app.post("/api/customers/payment-sync", auth, async (req, res, next) => {
       applied += 1;
     }
     await client.query("COMMIT");
-    return res.json({ ok: true, applied });
+    return res.json({ ok: true, applied, skipped });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     return next(error);
