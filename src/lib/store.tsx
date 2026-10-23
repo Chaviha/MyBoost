@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { toast } from "sonner";
 import { uid } from "./format";
 import {
   activeEmployment,
@@ -329,6 +330,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
   // The API validates the accepted relationship and applies each entry_id once.
   // Re-sending is safe, so temporary network failures are retried on state changes.
   const lastPaymentPushRef = useRef("");
+  const paymentWarnedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!ready || !authenticated || !state.currentUserId) return;
     const me = state.currentUserId;
@@ -350,7 +352,23 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           method: "POST", headers: { "Content-Type": "application/json" },
           credentials: "include", body: payload,
         });
-        if (res.ok) lastPaymentPushRef.current = payload;
+        if (res.ok) {
+          lastPaymentPushRef.current = payload;
+          // The API answers ok even when it declines a payment, so read why instead of showing false success.
+          const result = (await res.json().catch(() => null)) as { skipped?: { entry_id: string; reason: string }[] } | null;
+          const failed = (result?.skipped || []).filter((s) => s.reason !== "duplicate" && !paymentWarnedRef.current.has(s.entry_id));
+          if (failed.length) {
+            failed.forEach((s) => paymentWarnedRef.current.add(s.entry_id));
+            const reason = failed[0].reason;
+            toast.error(
+              reason === "payments_disabled"
+                ? "The business hasn't allowed payment updates yet, so they can't see this payment. Ask them to turn on “Allow customer payment updates”."
+                : reason === "no_balance"
+                  ? "The business shows nothing owing on your tab, so this payment wasn't applied."
+                  : "This payment couldn't be sent to the business. Check that your account is still linked to them.",
+            );
+          }
+        }
       } catch {
         // Leave the signature unchanged so a later state change retries.
       }
