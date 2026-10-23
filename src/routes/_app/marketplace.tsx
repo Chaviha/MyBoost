@@ -19,23 +19,19 @@ import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { ListingCover } from "@/components/listing-cover";
+import {
+  filterListings,
+  MarketKindChips,
+  MarketplaceListings,
+  type MarketKind,
+} from "@/components/marketplace-listings";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { initials, money } from "@/lib/format";
 import type { Asset, Business, Employee } from "@/lib/types";
@@ -55,9 +51,7 @@ type MarketplaceMedia = {
 function openWhatsApp(phone: string, text: string) {
   const digits = (phone || "").replace(/[^0-9]/g, "");
 
-  const number = digits.startsWith("0")
-    ? "254" + digits.slice(1)
-    : digits;
+  const number = digits.startsWith("0") ? "254" + digits.slice(1) : digits;
 
   if (number && typeof window !== "undefined") {
     window.open(
@@ -125,7 +119,8 @@ function MarketplacePage() {
     contactBusiness,
   } = useLife();
 
-  const [tab, setTab] = useState("assets");
+  const [tab, setTab] = useState("market");
+  const [kind, setKind] = useState<MarketKind>("all");
   const [q, setQ] = useState("");
   const [businessDetailId, setBusinessDetailId] = useState<string | null>(null);
 
@@ -161,17 +156,21 @@ function MarketplacePage() {
   const pros = (
     publicMarketplace.professionals as Array<Employee & { business_name: string }>
   ).filter((p) =>
-    `${p.name} ${p.role} ${p.location} ${p.business_name}`
-      .toLowerCase()
-      .includes(ql),
+    `${p.name} ${p.role} ${p.location} ${p.business_name}`.toLowerCase().includes(ql),
   );
+
+  const listings = filterListings(publicMarketplace.listings, kind, q);
+  const showAssets = kind === "all" || kind === "asset";
+  const showPros = kind === "all" || kind === "professional";
+  const nothingToShow =
+    listings.length === 0 && !(showAssets && assets.length > 0) && !(showPros && pros.length > 0);
 
   const firms = (publicMarketplace.businesses as Business[]).filter((b) =>
     `${b.business_name} ${b.tagline} ${b.region}`.toLowerCase().includes(ql),
   );
 
   const selectedMarketplaceBusiness = businessDetailId
-    ? firms.find((b) => b.business_id === businessDetailId) ?? null
+    ? (firms.find((b) => b.business_id === businessDetailId) ?? null)
     : null;
 
   function once(key: string, fn: () => void) {
@@ -208,7 +207,7 @@ function MarketplacePage() {
       <PageHeader
         eyebrow="Public listings"
         title="Marketplace"
-        subtitle="Assets, professionals and businesses listed by LifeBoost users."
+        subtitle="Products, services, assets, professionals and businesses listed by LifeBoost users."
       />
 
       <div className="mb-4 flex h-11 items-center gap-2 rounded-lg bg-paper px-3 shadow-border">
@@ -216,253 +215,276 @@ function MarketplacePage() {
         <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by name, role, location…"
+          placeholder="Search by name, category, location…"
           className="h-full border-0 bg-transparent shadow-none focus-visible:ring-0"
         />
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="grid h-auto w-full grid-cols-3 p-1">
-          <TabsTrigger value="assets">Assets ({assets.length})</TabsTrigger>
-          <TabsTrigger value="professionals">Pros ({pros.length})</TabsTrigger>
-          <TabsTrigger value="businesses">Firms ({firms.length})</TabsTrigger>
+        <TabsList className="grid h-auto w-full grid-cols-2 p-1">
+          <TabsTrigger value="market">Market</TabsTrigger>
+          <TabsTrigger value="businesses">Businesses</TabsTrigger>
         </TabsList>
 
-        {/* ASSETS */}
-        <TabsContent value="assets">
-          {assets.length === 0 ? (
+        {/* MARKET: products, services, assets and professionals */}
+        <TabsContent value="market">
+          <MarketKindChips kind={kind} onChange={setKind} />
+
+          {nothingToShow ? (
             <EmptyState
               icon={Store}
-              text={q ? "No assets match." : "No assets listed yet."}
+              text={q || kind !== "all" ? "Nothing matches your search." : "Nothing is listed yet."}
             />
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {assets.map((asset) => {
-                const items = assetMedia(asset);
+          ) : null}
 
-                return (
-                  <Card
-                    key={asset.asset_id}
-                    className="overflow-hidden p-0"
-                    onMouseEnter={() =>
-                      once(`a:${asset.asset_id}`, () => viewAsset(asset.asset_id))
-                    }
-                  >
-                    <button
-                      type="button"
-                      className="group relative block w-full cursor-zoom-in text-left"
-                      onClick={() => openMedia(asset.name, items)}
-                      aria-label={`View photos and videos of ${asset.name}`}
-                    >
-                      <ListingCover
-                        src={asset.image_url}
-                        alt={asset.name}
-                        type={asset.type}
-                        className="h-44"
-                      />
-                      <span className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg bg-black/75 px-3 py-2 text-xs text-white">
-                        <Maximize2 className="size-4" />
-                        View photos and videos
-                      </span>
-                    </button>
+          {listings.length > 0 ? (
+            <section className="mb-8">
+              {kind === "all" ? (
+                <h2 className="mb-3 font-display text-lg font-medium">Products &amp; services</h2>
+              ) : null}
+              <MarketplaceListings items={listings} />
+            </section>
+          ) : null}
 
-                    <div className="flex flex-col gap-2 p-5">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-medium tracking-[0.14em] text-forest uppercase">
-                          {asset.type}
-                        </p>
-                        <Badge tone="forest">
-                          {asset.listing_type || "For sale"}
-                        </Badge>
-                      </div>
+          {showAssets && assets.length > 0 ? (
+            <section className="mb-8">
+              {kind === "all" ? (
+                <h2 className="mb-3 font-display text-lg font-medium">Assets</h2>
+              ) : null}
+              {assets.length === 0 ? (
+                <EmptyState icon={Store} text={q ? "No assets match." : "No assets listed yet."} />
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {assets.map((asset) => {
+                    const items = assetMedia(asset);
 
-                      <h3 className="font-display text-xl font-medium tracking-tight">
-                        {asset.name}
-                      </h3>
-
-                      <p className="font-display text-2xl font-medium tabular-nums">
-                        {money(asset.value)}
-                      </p>
-
-                      {asset.notes ? (
-                        <p className="text-sm text-ink-muted">{asset.notes}</p>
-                      ) : null}
-
-                      {items.length > 0 ? (
-                        <div>
-                          <p className="mb-2 text-xs text-ink-muted">
-                            Photos and videos · Click to enlarge
-                          </p>
-                          <div className="grid grid-cols-4 gap-1.5">
-                            {items.slice(0, 4).map((media, index) => (
-                              <button
-                                key={media.media_id}
-                                type="button"
-                                className="relative overflow-hidden rounded-md focus-visible:outline-2"
-                                onClick={() => openMedia(asset.name, items, index)}
-                                aria-label={`Open media ${index + 1} for ${asset.name}`}
-                              >
-                                {isVideo(media) ? (
-                                  <video
-                                    src={media.url}
-                                    className="aspect-square w-full object-cover"
-                                    muted
-                                    playsInline
-                                    preload="metadata"
-                                  />
-                                ) : (
-                                  <img
-                                    src={media.url}
-                                    alt={media.name || asset.name}
-                                    loading="lazy"
-                                    className="aspect-square w-full object-cover"
-                                  />
-                                )}
-                                {isVideo(media) ? (
-                                  <span className="absolute inset-0 flex items-center justify-center bg-black/35 text-lg text-white">
-                                    ▶
-                                  </span>
-                                ) : (
-                                  <span className="absolute bottom-1 right-1 rounded bg-black/60 p-1 text-white">
-                                    <Maximize2 className="size-3" />
-                                  </span>
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                          {items.length > 4 ? (
-                            <button
-                              type="button"
-                              className="mt-2 text-sm font-medium text-forest underline"
-                              onClick={() => openMedia(asset.name, items)}
-                            >
-                              View all {items.length} items
-                            </button>
-                          ) : null}
-                        </div>
-                      ) : null}
-
-                      <p className="inline-flex items-center gap-1 text-xs text-ink-muted">
-                        <MapPin className="size-3" />
-                        {asset.location || "Location not provided"}
-                      </p>
-
-                      <div className="mt-1 flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1 text-xs text-ink-muted">
-                          <Eye className="size-3.5" />
-                          {asset.views || 0} views
-                        </span>
-                        <span className="inline-flex items-center gap-1 text-xs text-ink-muted">
-                          <MessageCircle className="size-3.5" />
-                          {asset.whatsapp_clicks || 0}
-                        </span>
-                      </div>
-
-                      <Button
-                        className="mt-1"
-                        onClick={() => {
-                          contactAsset(asset.asset_id);
-                          openWhatsApp(
-                            asset.phone,
-                            `Hi, I'm interested in your listing "${asset.name}" (${money(asset.value)}) on LifeBoost Marketplace.`,
-                          );
-                          toast.success(`Opening WhatsApp for ${asset.name}.`);
-                        }}
+                    return (
+                      <Card
+                        key={asset.asset_id}
+                        className="overflow-hidden p-0"
+                        onMouseEnter={() =>
+                          once(`a:${asset.asset_id}`, () => viewAsset(asset.asset_id))
+                        }
                       >
-                        <MessageCircle className="size-4" />
-                        Connect
-                      </Button>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </TabsContent>
+                        <button
+                          type="button"
+                          className="group relative block w-full cursor-zoom-in text-left"
+                          onClick={() => openMedia(asset.name, items)}
+                          aria-label={`View photos and videos of ${asset.name}`}
+                        >
+                          <ListingCover
+                            src={asset.image_url}
+                            alt={asset.name}
+                            type={asset.type}
+                            className="h-44"
+                          />
+                          <span className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg bg-black/75 px-3 py-2 text-xs text-white">
+                            <Maximize2 className="size-4" />
+                            View photos and videos
+                          </span>
+                        </button>
 
-        {/* PROFESSIONALS */}
-        <TabsContent value="professionals">
-          {pros.length === 0 ? (
-            <EmptyState
-              icon={BriefcaseBusiness}
-              text={q ? "No professionals match." : "No professionals listed yet."}
-            />
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {pros.map((p) => (
-                <Card
-                  key={p.employee_id}
-                  className="overflow-hidden p-0"
-                  onMouseEnter={() =>
-                    once(`p:${p.employee_id}`, () => viewProfessional(p.employee_id))
-                  }
-                >
-                  {(p as { image_url?: string }).image_url ? (
-                    <ListingCover
-                      src={(p as { image_url?: string }).image_url}
-                      alt={p.name}
-                      type="Other"
-                      className="h-36"
-                    />
-                  ) : (
-                    <div className="flex h-36 items-center justify-center bg-leaf">
-                      <div className="flex size-16 items-center justify-center rounded-full bg-paper font-display text-2xl font-medium text-forest">
-                        {initials(p.name)}
-                      </div>
-                    </div>
-                  )}
+                        <div className="flex flex-col gap-2 p-5">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-medium tracking-[0.14em] text-forest uppercase">
+                              {asset.type}
+                            </p>
+                            <Badge tone="forest">{asset.listing_type || "For sale"}</Badge>
+                          </div>
 
-                  <div className="p-5">
-                    <div className="mb-2 flex items-start justify-between gap-3">
-                      <Badge tone="amber">Professional</Badge>
-                    </div>
+                          <h3 className="font-display text-xl font-medium tracking-tight">
+                            {asset.name}
+                          </h3>
 
-                    <h3 className="font-display text-xl font-medium tracking-tight">
-                      {p.name}
-                    </h3>
+                          <p className="font-display text-2xl font-medium tabular-nums">
+                            {money(asset.value)}
+                          </p>
 
-                    <p className="text-sm text-ink-muted">
-                      {p.role}
-                      {p.business_name ? ` · ${p.business_name}` : ""}
-                    </p>
+                          {asset.notes ? (
+                            <p className="text-sm text-ink-muted">{asset.notes}</p>
+                          ) : null}
 
-                    {p.location ? (
-                      <p className="mt-1 inline-flex items-center gap-1 text-xs text-ink-muted">
-                        <MapPin className="size-3" />
-                        {p.location}
-                      </p>
-                    ) : null}
+                          {items.length > 0 ? (
+                            <div>
+                              <p className="mb-2 text-xs text-ink-muted">
+                                Photos and videos · Click to enlarge
+                              </p>
+                              <div className="grid grid-cols-4 gap-1.5">
+                                {items.slice(0, 4).map((media, index) => (
+                                  <button
+                                    key={media.media_id}
+                                    type="button"
+                                    className="relative overflow-hidden rounded-md focus-visible:outline-2"
+                                    onClick={() => openMedia(asset.name, items, index)}
+                                    aria-label={`Open media ${index + 1} for ${asset.name}`}
+                                  >
+                                    {isVideo(media) ? (
+                                      <video
+                                        src={media.url}
+                                        className="aspect-square w-full object-cover"
+                                        muted
+                                        playsInline
+                                        preload="metadata"
+                                      />
+                                    ) : (
+                                      <img
+                                        src={media.url}
+                                        alt={media.name || asset.name}
+                                        loading="lazy"
+                                        className="aspect-square w-full object-cover"
+                                      />
+                                    )}
+                                    {isVideo(media) ? (
+                                      <span className="absolute inset-0 flex items-center justify-center bg-black/35 text-lg text-white">
+                                        ▶
+                                      </span>
+                                    ) : (
+                                      <span className="absolute bottom-1 right-1 rounded bg-black/60 p-1 text-white">
+                                        <Maximize2 className="size-3" />
+                                      </span>
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                              {items.length > 4 ? (
+                                <button
+                                  type="button"
+                                  className="mt-2 text-sm font-medium text-forest underline"
+                                  onClick={() => openMedia(asset.name, items)}
+                                >
+                                  View all {items.length} items
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : null}
 
-                    <div className="mt-3 flex items-center gap-3 text-xs text-ink-muted">
-                      <span className="inline-flex items-center gap-1">
-                        <Eye className="size-3.5" />
-                        {p.views}
-                      </span>
-                      <span className="inline-flex items-center gap-1">
-                        <MessageCircle className="size-3.5" />
-                        {p.whatsapp_clicks}
-                      </span>
-                    </div>
+                          <p className="inline-flex items-center gap-1 text-xs text-ink-muted">
+                            <MapPin className="size-3" />
+                            {asset.location || "Location not provided"}
+                          </p>
 
-                    <Button
-                      className="mt-4 w-full"
-                      onClick={() => {
-                        contactProfessional(p.employee_id);
-                        openWhatsApp(
-                          p.phone,
-                          `Hi ${p.name}, I found you on LifeBoost Marketplace.`,
-                        );
-                        toast.success(`Opening WhatsApp for ${p.name}.`);
-                      }}
+                          <div className="mt-1 flex items-center justify-between gap-2">
+                            <span className="inline-flex items-center gap-1 text-xs text-ink-muted">
+                              <Eye className="size-3.5" />
+                              {asset.views || 0} views
+                            </span>
+                            <span className="inline-flex items-center gap-1 text-xs text-ink-muted">
+                              <MessageCircle className="size-3.5" />
+                              {asset.whatsapp_clicks || 0}
+                            </span>
+                          </div>
+
+                          <Button
+                            className="mt-1"
+                            onClick={() => {
+                              contactAsset(asset.asset_id);
+                              openWhatsApp(
+                                asset.phone,
+                                `Hi, I'm interested in your listing "${asset.name}" (${money(asset.value)}) on LifeBoost Marketplace.`,
+                              );
+                              toast.success(`Opening WhatsApp for ${asset.name}.`);
+                            }}
+                          >
+                            <MessageCircle className="size-4" />
+                            Connect
+                          </Button>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          {showPros && pros.length > 0 ? (
+            <section className="mb-8">
+              {kind === "all" ? (
+                <h2 className="mb-3 font-display text-lg font-medium">Professionals</h2>
+              ) : null}
+              {pros.length === 0 ? (
+                <EmptyState
+                  icon={BriefcaseBusiness}
+                  text={q ? "No professionals match." : "No professionals listed yet."}
+                />
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {pros.map((p) => (
+                    <Card
+                      key={p.employee_id}
+                      className="overflow-hidden p-0"
+                      onMouseEnter={() =>
+                        once(`p:${p.employee_id}`, () => viewProfessional(p.employee_id))
+                      }
                     >
-                      <MessageCircle className="size-4" />
-                      Contact on WhatsApp
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
+                      {(p as { image_url?: string }).image_url ? (
+                        <ListingCover
+                          src={(p as { image_url?: string }).image_url}
+                          alt={p.name}
+                          type="Other"
+                          className="h-36"
+                        />
+                      ) : (
+                        <div className="flex h-36 items-center justify-center bg-leaf">
+                          <div className="flex size-16 items-center justify-center rounded-full bg-paper font-display text-2xl font-medium text-forest">
+                            {initials(p.name)}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="p-5">
+                        <div className="mb-2 flex items-start justify-between gap-3">
+                          <Badge tone="amber">Professional</Badge>
+                        </div>
+
+                        <h3 className="font-display text-xl font-medium tracking-tight">
+                          {p.name}
+                        </h3>
+
+                        <p className="text-sm text-ink-muted">
+                          {p.role}
+                          {p.business_name ? ` · ${p.business_name}` : ""}
+                        </p>
+
+                        {p.location ? (
+                          <p className="mt-1 inline-flex items-center gap-1 text-xs text-ink-muted">
+                            <MapPin className="size-3" />
+                            {p.location}
+                          </p>
+                        ) : null}
+
+                        <div className="mt-3 flex items-center gap-3 text-xs text-ink-muted">
+                          <span className="inline-flex items-center gap-1">
+                            <Eye className="size-3.5" />
+                            {p.views}
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <MessageCircle className="size-3.5" />
+                            {p.whatsapp_clicks}
+                          </span>
+                        </div>
+
+                        <Button
+                          className="mt-4 w-full"
+                          onClick={() => {
+                            contactProfessional(p.employee_id);
+                            openWhatsApp(
+                              p.phone,
+                              `Hi ${p.name}, I found you on LifeBoost Marketplace.`,
+                            );
+                            toast.success(`Opening WhatsApp for ${p.name}.`);
+                          }}
+                        >
+                          <MessageCircle className="size-4" />
+                          Contact on WhatsApp
+                        </Button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
         </TabsContent>
 
         {/* BUSINESSES */}
@@ -478,9 +500,7 @@ function MarketplacePage() {
                 <Card
                   key={b.business_id}
                   className="cursor-pointer overflow-hidden p-0 transition hover:-translate-y-0.5"
-                  onMouseEnter={() =>
-                    once(`b:${b.business_id}`, () => viewBusiness(b.business_id))
-                  }
+                  onMouseEnter={() => once(`b:${b.business_id}`, () => viewBusiness(b.business_id))}
                   onClick={() => setBusinessDetailId(b.business_id)}
                 >
                   <div className="relative">
@@ -510,15 +530,9 @@ function MarketplacePage() {
                         {b.business_type}
                       </p>
                       <Badge
-                        tone={
-                          String(b.status).toLowerCase() === "closed"
-                            ? "amber"
-                            : "forest"
-                        }
+                        tone={String(b.status).toLowerCase() === "closed" ? "amber" : "forest"}
                       >
-                        {String(b.status).toLowerCase() === "closed"
-                          ? "Closed"
-                          : "Open"}
+                        {String(b.status).toLowerCase() === "closed" ? "Closed" : "Open"}
                       </Badge>
                     </div>
 
@@ -526,9 +540,7 @@ function MarketplacePage() {
                       {b.business_name}
                     </h3>
 
-                    <p className="text-sm text-ink-muted">
-                      {b.tagline || b.business_type}
-                    </p>
+                    <p className="text-sm text-ink-muted">{b.tagline || b.business_type}</p>
 
                     {b.region ? (
                       <p className="inline-flex items-center gap-1 text-xs text-ink-muted">
@@ -557,9 +569,7 @@ function MarketplacePage() {
                           b.phone,
                           `Hi, I found ${b.business_name} on LifeBoost Marketplace.`,
                         );
-                        toast.success(
-                          `Opening WhatsApp for ${b.business_name}.`,
-                        );
+                        toast.success(`Opening WhatsApp for ${b.business_name}.`);
                       }}
                     >
                       <MessageCircle className="size-4" />
@@ -630,53 +640,42 @@ function MarketplacePage() {
 
                 {businessMedia(selectedMarketplaceBusiness).length > 0 ? (
                   <div>
-                    <h4 className="mb-3 font-display text-xl font-medium">
-                      Explore our work
-                    </h4>
+                    <h4 className="mb-3 font-display text-xl font-medium">Explore our work</h4>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      {businessMedia(selectedMarketplaceBusiness).map(
-                        (media, index) => (
-                          <button
-                            key={media.media_id}
-                            type="button"
-                            className="relative overflow-hidden rounded-xl text-left"
-                            onClick={() =>
-                              openMedia(
-                                selectedMarketplaceBusiness.business_name,
-                                businessMedia(selectedMarketplaceBusiness),
-                                index,
-                              )
-                            }
-                          >
-                            {isVideo(media) ? (
-                              <video
-                                src={media.url}
-                                muted
-                                playsInline
-                                preload="metadata"
-                                className="aspect-square w-full object-cover"
-                              />
-                            ) : (
-                              <img
-                                src={media.url}
-                                alt={
-                                  media.name ||
-                                  selectedMarketplaceBusiness.business_name
-                                }
-                                loading="lazy"
-                                className="aspect-square w-full object-cover"
-                              />
-                            )}
-                            <span className="absolute inset-0 flex items-center justify-center gap-1 bg-black/25 text-white">
-                              {isVideo(media) ? (
-                                <>▶ Play video</>
-                              ) : (
-                                <Maximize2 className="size-6" />
-                              )}
-                            </span>
-                          </button>
-                        ),
-                      )}
+                      {businessMedia(selectedMarketplaceBusiness).map((media, index) => (
+                        <button
+                          key={media.media_id}
+                          type="button"
+                          className="relative overflow-hidden rounded-xl text-left"
+                          onClick={() =>
+                            openMedia(
+                              selectedMarketplaceBusiness.business_name,
+                              businessMedia(selectedMarketplaceBusiness),
+                              index,
+                            )
+                          }
+                        >
+                          {isVideo(media) ? (
+                            <video
+                              src={media.url}
+                              muted
+                              playsInline
+                              preload="metadata"
+                              className="aspect-square w-full object-cover"
+                            />
+                          ) : (
+                            <img
+                              src={media.url}
+                              alt={media.name || selectedMarketplaceBusiness.business_name}
+                              loading="lazy"
+                              className="aspect-square w-full object-cover"
+                            />
+                          )}
+                          <span className="absolute inset-0 flex items-center justify-center gap-1 bg-black/25 text-white">
+                            {isVideo(media) ? <>▶ Play video</> : <Maximize2 className="size-6" />}
+                          </span>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 ) : null}
@@ -758,9 +757,7 @@ function MarketplacePage() {
                           src={current.url}
                           alt={current.name || mediaViewer.title}
                           draggable={false}
-                          onDoubleClick={() =>
-                            setZoom((value) => (value === 1 ? 2 : 1))
-                          }
+                          onDoubleClick={() => setZoom((value) => (value === 1 ? 2 : 1))}
                           style={{
                             transform: `scale(${zoom})`,
                             transformOrigin: "center center",
@@ -803,9 +800,7 @@ function MarketplacePage() {
                           variant="outline"
                           size="icon"
                           disabled={zoom <= 1}
-                          onClick={() =>
-                            setZoom((value) => Math.max(1, value - 0.5))
-                          }
+                          onClick={() => setZoom((value) => Math.max(1, value - 0.5))}
                           aria-label="Zoom out"
                         >
                           <Minus className="size-4" />
@@ -820,19 +815,13 @@ function MarketplacePage() {
                           variant="outline"
                           size="icon"
                           disabled={zoom >= 3}
-                          onClick={() =>
-                            setZoom((value) => Math.min(3, value + 0.5))
-                          }
+                          onClick={() => setZoom((value) => Math.min(3, value + 0.5))}
                           aria-label="Zoom in"
                         >
                           <Plus className="size-4" />
                         </Button>
 
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setZoom(1)}
-                        >
+                        <Button type="button" variant="outline" onClick={() => setZoom(1)}>
                           Reset zoom
                         </Button>
 
@@ -850,14 +839,10 @@ function MarketplacePage() {
                             type="button"
                             onClick={() => changeMedia(index)}
                             className={`relative size-16 shrink-0 overflow-hidden rounded-lg border-2 ${
-                              index === mediaViewer.index
-                                ? "border-primary"
-                                : "border-transparent"
+                              index === mediaViewer.index ? "border-primary" : "border-transparent"
                             }`}
                             aria-label={`Show media ${index + 1}`}
-                            aria-current={
-                              index === mediaViewer.index ? "true" : undefined
-                            }
+                            aria-current={index === mediaViewer.index ? "true" : undefined}
                           >
                             {isVideo(item) ? (
                               <video
