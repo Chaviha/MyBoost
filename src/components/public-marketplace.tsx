@@ -25,6 +25,10 @@ export function PublicMarketplace() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [serverError, setServerError] = useState(false);
+  const [userLocation, setUserLocation] = useState<{
+  latitude: number;
+  longitude: number;
+} | null>(null);
   const seen = useRef(new Set<string>());
 
   const loadMarketplace = async () => {
@@ -41,6 +45,26 @@ export function PublicMarketplace() {
     window.addEventListener("focus", onFocus);
     return () => { window.clearInterval(timer); window.removeEventListener("focus", onFocus); };
   }, []);
+  useEffect(() => {
+  if (!("geolocation" in navigator)) return;
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      setUserLocation({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+    },
+    () => {
+      // Keep the existing listing order if location is unavailable.
+    },
+    {
+      enableHighAccuracy: false,
+      timeout: 10000,
+      maximumAge: 300000,
+    },
+  );
+}, []);
 
   const query = q.trim().toLowerCase();
   const businesses = useMemo(() => (publicMarketplace.businesses as Business[]).filter(b => `${b.business_name} ${b.business_type} ${b.region} ${b.tagline}`.toLowerCase().includes(query)), [publicMarketplace.businesses, query]);
