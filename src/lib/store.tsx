@@ -40,6 +40,7 @@ import type {
   JobStatus,
   LedgerEntry,
   LifeState,
+  MarketplaceListing,
   MarketplaceProduct,
   MediaItem,
   MoneyRequest,
@@ -109,7 +110,8 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     professionals: Array<Record<string, unknown>>;
     assets: Array<Record<string, unknown>>;
     products: MarketplaceProduct[];
-  }>({ businesses: [], professionals: [], assets: [], products: [] });
+    listings: MarketplaceListing[];
+  }>({ businesses: [], professionals: [], assets: [], products: [], listings: [] });
 
   const refreshPublicMarketplace = async (): Promise<boolean> => {
     try {
@@ -124,6 +126,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         professionals: Array.isArray(payload.professionals) ? payload.professionals : [],
         assets: Array.isArray(payload.assets) ? payload.assets : [],
         products: Array.isArray(payload.products) ? payload.products : [],
+        listings: Array.isArray(payload.listings) ? payload.listings : [],
       });
       return true;
     } catch {
