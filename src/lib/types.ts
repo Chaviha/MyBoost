@@ -349,6 +349,24 @@ export type MarketplaceProduct = {
   specs?: Record<string, string | number>;
 };
 
+/** A product or service shown on the Marketplace "Products" tab (businesses that chose to be listed only). */
+export type MarketplaceListing = {
+  product_id: string;
+  business_id: string;
+  business_name: string;
+  business_phone: string;
+  item_kind: "product" | "service";
+  name: string;
+  category: string;
+  family: string;
+  unit: string;
+  selling_price: number;
+  description: string;
+  specs: Record<string, string | number>;
+  image_url: string;
+  gallery: Array<{ media_id: string; url: string; name?: string; media_type?: string }>;
+};
+
 export type Job = {
   job_id: string;
   business_id: string;
