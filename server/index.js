@@ -666,6 +666,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
     const professionals = [];
     const assets = [];
     const products = [];
+    const listings = [];
     const demoBusinessIds = new Set(["BUS001", "BUS002"]);
     const demoBusinessNames = new Set(["Felix Hardware", "Garden Kitchen"]);
     const demoProductIds = new Set(["PRD001", "PRD002"]);
@@ -726,6 +727,30 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
         }
       }
 
+      // Marketplace "Products" tab: products AND services, but only from businesses that chose to be
+      // listed. Cost price and stock levels are never included.
+      const listedById = new Map(listedBusinesses.map((b) => [b.business_id, b]));
+      for (const product of Array.isArray(state.products) ? state.products : []) {
+        const owner = listedById.get(product?.business_id);
+        if (!owner || product.status === "inactive" || demoProductIds.has(product.product_id)) continue;
+        listings.push({
+          product_id: product.product_id,
+          business_id: product.business_id,
+          business_name: owner.business_name,
+          business_phone: owner.phone || "",
+          item_kind: product.item_kind === "service" ? "service" : "product",
+          name: product.name,
+          category: product.category || "",
+          family: product.family || "",
+          unit: product.unit || "unit",
+          selling_price: Number(product.selling_price || 0),
+          description: product.description || "",
+          specs: product.specs && typeof product.specs === "object" ? product.specs : {},
+          image_url: product.image_url || "",
+          gallery: Array.isArray(product.gallery) ? product.gallery : [],
+        });
+      }
+
       // Products power cross-business quotation pricing (steel, DXF cut, materials —
       // any sector). Every active product is available for quotations by default —
       // no separate "list for quotations" flag. Business directory listing is separate.
@@ -750,7 +775,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
       }
     }
 
-    res.json({ businesses, professionals, assets, products });
+    res.json({ businesses, professionals, assets, products, listings });
   } catch (error) {
     next(error);
   }
