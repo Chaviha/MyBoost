@@ -1,4 +1,3 @@
-
 import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router";
 import { AppShell } from "@/components/app-shell";
 import { AuthScreen } from "@/components/auth-screen";
@@ -31,7 +30,9 @@ function AuthenticatedLayout() {
   const wantsAuth =
     params.get("auth") === "login" ||
     params.get("auth") === "register" ||
-    params.get("auth") === "forgot";
+    params.get("auth") === "forgot" ||
+    // Password-reset emails link to /?reset=TOKEN; show the reset form, not the marketplace.
+    Boolean(params.get("reset"));
 
   // Always show the public Marketplace at the website root.
   // Login and registration URLs remain available.
