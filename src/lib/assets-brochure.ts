@@ -201,25 +201,39 @@ function assetSectionHtml(a: BrochureAsset, index: number, total: number): strin
 }
 
 
-/** Fetch an image URL (with cookies) and return a data URL, or the absolute URL as fallback. */
+/**
+ * Fetch an image URL and return a data URL, or the absolute URL as fallback.
+ * Same-origin uploads send cookies; cross-origin URLs (Cloudflare R2) must be
+ * fetched WITHOUT credentials, because R2 CORS cannot answer credentialed requests.
+ */
 async function urlToDataUrl(url: string): Promise<string> {
   const abs = absoluteUrl(url);
   if (!abs) return "";
   if (/^data:/i.test(abs)) return abs;
+  let sameOrigin = false;
   try {
-    const res = await fetch(abs, { credentials: "include", mode: "cors" });
-    if (!res.ok) return abs;
-    const blob = await res.blob();
-    if (!blob.type.startsWith("image/")) return abs;
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || abs));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
+    sameOrigin = new URL(abs).origin === window.location.origin;
   } catch {
-    return abs;
+    /* keep false */
   }
+  const attempts: RequestCredentials[] = sameOrigin ? ["include", "omit"] : ["omit"];
+  for (const credentials of attempts) {
+    try {
+      const res = await fetch(abs, { credentials, mode: "cors" });
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      if (!blob.type.startsWith("image/")) continue;
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || abs));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      /* try next */
+    }
+  }
+  return abs;
 }
 
 /** Inline all image URLs on assets so the brochure does not depend on relative paths. */
