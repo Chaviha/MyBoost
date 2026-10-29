@@ -53,6 +53,10 @@ async function removeUpload(key, localPath) {
   if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
 }
 
+// After moving to R2, older records may still point at /uploads/... files that were lost
+// when the container disk reset. Treat those as empty so a new R2 upload becomes the cover image.
+const isStaleLocalUpload = (url) => r2Enabled && String(url || "").startsWith("/uploads/");
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadRoot = path.join(__dirname, "..", "uploads", "businesses");
 const assetUploadRoot = path.join(__dirname, "..", "uploads", "assets");
@@ -415,7 +419,7 @@ app.post("/api/businesses/:businessId/media", auth, async (req, res, next) => {
           ? {
               ...b,
               gallery: [...(Array.isArray(b.gallery) ? b.gallery : []), media],
-              image_url: b.image_url || (media.media_type === "image" ? media.url : b.image_url),
+              image_url: (b.image_url && !isStaleLocalUpload(b.image_url)) ? b.image_url : (media.media_type === "image" ? media.url : b.image_url),
             }
           : b,
       ),
@@ -496,7 +500,7 @@ app.post("/api/assets/:assetId/media", auth, async (req, res, next) => {
           ? {
               ...a,
               gallery: [...(Array.isArray(a.gallery) ? a.gallery : []), media],
-              image_url: a.image_url || (media.media_type === "image" ? media.url : a.image_url),
+              image_url: (a.image_url && !isStaleLocalUpload(a.image_url)) ? a.image_url : (media.media_type === "image" ? media.url : a.image_url),
             }
           : a,
       ),
@@ -555,7 +559,7 @@ app.post("/api/employees/:employeeId/media", auth, async (req, res, next) => {
           ? {
               ...e,
               gallery: [...(Array.isArray(e.gallery) ? e.gallery : []), media],
-              image_url: e.image_url || (media.media_type === "image" ? media.url : e.image_url),
+              image_url: (e.image_url && !isStaleLocalUpload(e.image_url)) ? e.image_url : (media.media_type === "image" ? media.url : e.image_url),
             }
           : e,
       ),
@@ -620,7 +624,7 @@ app.post("/api/products/:productId/media", auth, async (req, res, next) => {
           ? {
               ...p,
               gallery: [...(Array.isArray(p.gallery) ? p.gallery : []), media],
-              image_url: p.image_url || (media.media_type === "image" ? media.url : p.image_url),
+              image_url: (p.image_url && !isStaleLocalUpload(p.image_url)) ? p.image_url : (media.media_type === "image" ? media.url : p.image_url),
             }
           : p,
       ),
