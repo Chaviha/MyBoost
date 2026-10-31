@@ -144,6 +144,17 @@ export type Customer = {
   allow_customer_payments?: boolean;
 };
 
+export type PaymentLineItem = {
+  line_id: string;
+  product_id?: string;
+  description: string;
+  qty: number;
+  unit_price: number;
+  amount: number;
+};
+
+export type PaymentStatus = "active" | "reversed" | "edited";
+
 export type LedgerEntry = {
   entry_id: string;
   business_id: string;
@@ -160,6 +171,28 @@ export type LedgerEntry = {
   reference_type?: "quotation" | "invoice" | "manual";
   /** Present on payments a linked customer submitted through the server. */
   via?: "customer-sync";
+  /** Unique receipt number for payments (e.g. RCPT-20261031-AB12). */
+  receipt_number?: string;
+  /** When payment is applied against an invoice. */
+  invoice_id?: string;
+  /** Payment mode: invoice-linked or direct tab payment. */
+  payment_kind?: "invoice" | "direct";
+  /** Optional product/service lines captured with the payment. */
+  line_items?: PaymentLineItem[];
+  /** Method note e.g. M-Pesa, Cash, Bank. */
+  method?: string;
+  /** active (default) | reversed | edited */
+  status?: PaymentStatus;
+  /** If this entry reverses another payment. */
+  reverses_entry_id?: string;
+  /** If this payment was reversed, the reversing entry id. */
+  reversed_by_entry_id?: string;
+  reversed_at?: string;
+  reversed_by?: string;
+  /** Soft-edit audit: original amount before last edit. */
+  previous_amount?: number;
+  updated_at?: string;
+  updated_by?: string;
 };
 
 export type Employee = {
@@ -449,6 +482,9 @@ export type Invoice = {
   total: number;
   paid: number;
   status: InvoiceStatus;
+  /** Products/services billed on this invoice — used when recording invoice-linked payments. */
+  line_items?: PaymentLineItem[];
+  notes?: string;
 };
 
 export type Income = {

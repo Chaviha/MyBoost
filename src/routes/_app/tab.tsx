@@ -273,7 +273,7 @@ function TabPage() {
                         ) : null}
                       </div>
                       <div className="mt-4">
-                        <LedgerList entries={ledgerFor(customer.customer_id)} />
+                        <LedgerList entries={ledgerFor(customer.customer_id)} customer={customer} canManagePayments={false} />
                       </div>
                     </div>
                   </Card>
@@ -298,6 +298,7 @@ function TabPage() {
         customer={payFor}
         open={Boolean(payFor)}
         onClose={() => setPayFor(null)}
+        products={payFor ? productsFor(payFor) : []}
         onSubmit={(form) => {
           recordCustomerPayment(form);
           toast.success("Payment recorded. The business will see it shortly.");

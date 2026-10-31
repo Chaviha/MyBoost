@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Bell, CreditCard, Minus, Plus, Search, Users, Pencil, Trash2 } from "lucide-react";
+import { Bell, CreditCard, Download, Minus, Plus, Printer, Search, Users, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
@@ -20,6 +20,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { formatDate, money } from "@/lib/format";
+import {
+  downloadInvoiceHtml,
+  printInvoice,
+} from "@/lib/payment-invoice-export";
 import { chargeModeLabel } from "@/lib/roles";
 import { useLife } from "@/lib/store";
 import type { ChargeMode, Customer, CustomerStatus } from "@/lib/types";
@@ -40,9 +44,13 @@ function CustomersPage() {
     selectedBusiness,
     businessCustomers,
     businessProducts,
+    businessInvoices,
     addCustomer,
     addCustomerCharge,
     recordCustomerPayment,
+    updateCustomerPayment,
+    updateInvoice,
+    deleteInvoice,
     setChargeMode,
     ledgerFor,
     canCharge,
@@ -56,6 +64,7 @@ function CustomersPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [chargeFor, setChargeFor] = useState<Customer | null>(null);
   const [payFor, setPayFor] = useState<Customer | null>(null);
+  const [editingPayment, setEditingPayment] = useState<import("@/lib/types").LedgerEntry | null>(null);
 
   if (!can("manage_customers")) {
     return (
@@ -181,7 +190,116 @@ function CustomersPage() {
                         Remind
                       </Button>
                     </div>
-                    <LedgerList entries={ledgerFor(customer.customer_id)} />
+                    {(() => {
+                      const custInvoices = (businessInvoices || []).filter(
+                        (inv) => inv.customer_id === customer.customer_id,
+                      );
+                      if (!custInvoices.length) return null;
+                      return (
+                        <div className="mb-4">
+                          <p className="mb-2 text-xs font-medium tracking-wide text-ink-muted uppercase">
+                            Invoices
+                          </p>
+                          <ul className="flex flex-col gap-2">
+                            {custInvoices.map((inv) => (
+                              <li
+                                key={inv.invoice_id}
+                                className="flex items-start justify-between gap-3 rounded-lg border border-line px-3 py-2.5"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium">
+                                    {inv.invoice_id}
+                                    <span className="ml-2 text-xs font-normal text-ink-muted">
+                                      {inv.status}
+                                    </span>
+                                  </p>
+                                  <p className="text-xs text-ink-muted">
+                                    Due {formatDate(inv.due_date)} · Paid {money(inv.paid)} of{" "}
+                                    {money(inv.total)}
+                                    {inv.line_items?.length
+                                      ? ` · ${inv.line_items.length} item${inv.line_items.length === 1 ? "" : "s"}`
+                                      : ""}
+                                  </p>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-1">
+                                  <p className="text-sm font-medium tabular-nums">
+                                    {money(inv.total)}
+                                  </p>
+                                  <MoreActions
+                                    label="Invoice actions"
+                                    actions={[
+                                      {
+                                        label: "Print invoice",
+                                        icon: <Printer className="size-4" />,
+                                        onSelect: () =>
+                                          printInvoice(inv, {
+                                            business_name:
+                                              selectedBusiness?.business_name || "Business",
+                                            phone: selectedBusiness?.phone,
+                                            email: selectedBusiness?.email,
+                                            region: selectedBusiness?.region,
+                                          }),
+                                      },
+                                      {
+                                        label: "Download invoice",
+                                        icon: <Download className="size-4" />,
+                                        onSelect: () => {
+                                          downloadInvoiceHtml(inv, {
+                                            business_name:
+                                              selectedBusiness?.business_name || "Business",
+                                            phone: selectedBusiness?.phone,
+                                            email: selectedBusiness?.email,
+                                            region: selectedBusiness?.region,
+                                          });
+                                          toast.success("Invoice downloaded.");
+                                        },
+                                      },
+                                      ...(inv.status !== "Paid"
+                                        ? [
+                                            {
+                                              label: "Record payment",
+                                              icon: <CreditCard className="size-4" />,
+                                              onSelect: () => {
+                                                setPayFor(customer);
+                                              },
+                                            },
+                                          ]
+                                        : []),
+                                      {
+                                        label: "Delete",
+                                        destructive: true,
+                                        icon: <Trash2 className="size-4" />,
+                                        onSelect: () => {
+                                          if (
+                                            window.confirm(
+                                              `Delete invoice ${inv.invoice_id}? Unpaid balance is removed from the tab.`,
+                                            )
+                                          ) {
+                                            deleteInvoice(inv.invoice_id);
+                                            toast.success("Invoice deleted.");
+                                          }
+                                        },
+                                      },
+                                    ]}
+                                  />
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })()}
+                    <p className="mb-2 text-xs font-medium tracking-wide text-ink-muted uppercase">
+                      Ledger
+                    </p>
+                    <LedgerList
+                      entries={ledgerFor(customer.customer_id)}
+                      customer={customer}
+                      onEditPayment={(entry) => {
+                        setPayFor(customer);
+                        setEditingPayment(entry);
+                      }}
+                    />
                   </div>
                 ) : null}
               </Card>
@@ -213,16 +331,37 @@ function CustomersPage() {
         onClose={() => setChargeFor(null)}
         onSubmit={(form) => {
           addCustomerCharge(form);
-          toast.success("Charge added to the tab.");
+          toast.success("Charge added — invoice created on this customer.");
         }}
       />
       <PaymentDialog
         customer={payFor}
         open={Boolean(payFor)}
-        onClose={() => setPayFor(null)}
+        onClose={() => {
+          setPayFor(null);
+          setEditingPayment(null);
+        }}
+        products={businessProducts || []}
+        invoices={businessInvoices || []}
+        editing={editingPayment}
         onSubmit={(form) => {
-          recordCustomerPayment(form);
-          toast.success("Payment recorded.");
+          try {
+            if (form.entryId) {
+              updateCustomerPayment?.(form);
+              toast.success("Payment updated.");
+            } else {
+              recordCustomerPayment?.(form);
+              toast.success(
+                form.paymentKind === "invoice"
+                  ? "Payment recorded — receipt created and applied to invoice."
+                  : "Payment recorded — receipt created.",
+              );
+            }
+          } catch (err) {
+            console.error(err);
+            toast.error("Could not save payment. Please try again.");
+          }
+          setEditingPayment(null);
         }}
       />
     </>

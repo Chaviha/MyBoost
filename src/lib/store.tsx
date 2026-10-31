@@ -76,6 +76,22 @@ const guestUser: User = {
 };
 
 // Derives a customer's tab status from their due date and outstanding balance.
+
+function nextReceiptNumber(ledger: LedgerEntry[], businessId: string) {
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const prefix = `RCPT-${day}-`;
+  const existing = new Set(
+    (ledger || [])
+      .filter((e) => e.business_id === businessId && e.receipt_number)
+      .map((e) => e.receipt_number as string),
+  );
+  for (let i = 0; i < 50; i++) {
+    const candidate = `${prefix}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    if (!existing.has(candidate)) return candidate;
+  }
+  return `${prefix}${uid("R").slice(-4)}`;
+}
+
 function dueStatus(dueDate: string, amount: number): CustomerStatus {
   if (Number(amount || 0) <= 0) return "Paid";
   if (!dueDate) return "Pending";
@@ -88,6 +104,20 @@ function dueStatus(dueDate: string, amount: number): CustomerStatus {
   if (daysUntilDue < 0) return "Overdue";
   if (daysUntilDue <= 3) return "Due soon";
   return "Pending";
+}
+
+
+/** Marketplace only shows items that have a cover image (image_url or gallery image). */
+function hasMarketplaceCover(item: {
+  image_url?: string;
+  gallery?: Array<{ url?: string; media_type?: string }>;
+} | null | undefined) {
+  const url = String(item?.image_url || "").trim();
+  if (url) return true;
+  const gallery = Array.isArray(item?.gallery) ? item.gallery : [];
+  return gallery.some(
+    (m) => m && m.media_type !== "video" && String(m.url || "").trim(),
+  );
 }
 
 function enrich(state: LifeState, business: Business): EnrichedBusiness {
@@ -122,11 +152,11 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       if (!response.ok) return false;
       const payload = await response.json();
       setPublicMarketplace({
-        businesses: Array.isArray(payload.businesses) ? payload.businesses : [],
-        professionals: Array.isArray(payload.professionals) ? payload.professionals : [],
-        assets: Array.isArray(payload.assets) ? payload.assets : [],
+        businesses: (Array.isArray(payload.businesses) ? payload.businesses : []).filter(hasMarketplaceCover),
+        professionals: (Array.isArray(payload.professionals) ? payload.professionals : []).filter(hasMarketplaceCover),
+        assets: (Array.isArray(payload.assets) ? payload.assets : []).filter(hasMarketplaceCover),
         products: Array.isArray(payload.products) ? payload.products : [],
-        listings: Array.isArray(payload.listings) ? payload.listings : [],
+        listings: (Array.isArray(payload.listings) ? payload.listings : []).filter(hasMarketplaceCover),
       });
       return true;
     } catch {
@@ -585,7 +615,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       return false;
     });
 
-    const marketplace = state.assets.filter((a) => a.listed);
+    const marketplace = state.assets.filter((a) => a.listed && hasMarketplaceCover(a));
 
     const businessCustomers = state.customers.filter((c) => c.business_id === bid);
     const businessEmployees = state.employees.filter((e) => e.business_id === bid);
@@ -616,7 +646,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       return emp?.user_id === currentUser.user_id;
     });
     const businessQuotes = state.quotations.filter((q) => q.business_id === bid);
-    const businessInvoices = state.invoices.filter((i) => i.business_id === bid);
+    const businessInvoices = (state.invoices || []).filter((i) => i.business_id === bid);
     const myIncome = state.income.filter((i) => i.user_id === currentUser.user_id);
     const mySaccos = state.saccos.filter((s) => s.user_id === currentUser.user_id);
     const myOffers = state.offers.filter((o) => o.user_id === currentUser.user_id);
@@ -2415,8 +2445,6 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         }));
       },
       addCustomerCharge: (form) => {
-        const amountIn = Number(form.amount || 0);
-        const qty = Number(form.qty || 0);
         setState((prev) => {
           const customer = prev.customers.find((c) => c.customer_id === form.customerId);
           const user = prev.users.find((u) => u.user_id === prev.currentUserId);
@@ -2427,44 +2455,121 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               (b.owner_user_id === user.user_id || user.account_level === "admin"),
           );
           if (!canPostCharge({ customer, user, isBusinessOwner: owner })) return prev;
-          const product = form.productId
-            ? prev.products.find((p) => p.product_id === form.productId)
-            : undefined;
-          const qtyUsed = product ? Math.max(1, qty || 1) : 0;
-          const amount = product ? product.selling_price * qtyUsed : amountIn;
+
+          const lineItems = Array.isArray(form.lineItems) ? form.lineItems : undefined;
+          let amount = 0;
+          let description = form.description || "";
+          let productId = "";
+          let qtyUsed = 0;
+          let products = prev.products;
+
+          if (lineItems && lineItems.length > 0) {
+            amount = lineItems.reduce((s, li) => s + Number(li.amount || 0), 0);
+            description =
+              description ||
+              lineItems.map((li) => `${li.qty} × ${li.description}`).join(", ");
+            productId = lineItems[0]?.product_id || "";
+            qtyUsed = Number(lineItems[0]?.qty || 0);
+            const stockDelta = new Map<string, number>();
+            for (const li of lineItems) {
+              if (li.product_id) {
+                stockDelta.set(
+                  li.product_id,
+                  (stockDelta.get(li.product_id) || 0) + Math.max(0, Number(li.qty || 0)),
+                );
+              }
+            }
+            if (stockDelta.size) {
+              products = prev.products.map((p) => {
+                const used = stockDelta.get(p.product_id);
+                if (!used) return p;
+                return { ...p, stock: Math.max(0, Number(p.stock || 0) - used) };
+              });
+            }
+          } else {
+            const product = form.productId
+              ? prev.products.find((p) => p.product_id === form.productId)
+              : undefined;
+            qtyUsed = product ? Math.max(1, Number(form.qty || 1)) : 0;
+            amount = product
+              ? product.selling_price * qtyUsed
+              : Number(form.amount || 0);
+            description =
+              description ||
+              (product ? `${qtyUsed} × ${product.name}` : "Product taken on credit");
+            productId = product?.product_id ?? "";
+            if (product) {
+              products = prev.products.map((p) =>
+                p.product_id === product.product_id
+                  ? { ...p, stock: Math.max(0, p.stock - qtyUsed) }
+                  : p,
+              );
+            }
+          }
+
           if (amount <= 0) return prev;
-          const description =
-            form.description ||
-            (product ? `${qtyUsed} × ${product.name}` : "Product taken on credit");
-          const nextAmount = customer.amount + amount;
+          const nextAmount = Number(customer.amount || 0) + amount;
+          const invoice_id = uid("INV");
+          const entry_id = uid("LED");
+          const due =
+            customer.due_date ||
+            new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+          const invoiceLines =
+            lineItems && lineItems.length
+              ? lineItems
+              : [
+                  {
+                    line_id: uid("LN"),
+                    product_id: productId || undefined,
+                    description: description || "Charge",
+                    qty: qtyUsed || 1,
+                    unit_price: amount / Math.max(1, qtyUsed || 1),
+                    amount,
+                  },
+                ];
+
           return {
             ...prev,
-            products: product
-              ? prev.products.map((p) =>
-                  p.product_id === product.product_id
-                    ? { ...p, stock: Math.max(0, p.stock - qtyUsed) }
-                    : p,
-                )
-              : prev.products,
+            products,
             customers: prev.customers.map((c) =>
               c.customer_id === customer.customer_id
                 ? { ...c, amount: nextAmount, status: dueStatus(c.due_date, nextAmount) }
                 : c,
             ),
-            ledger: [
+            invoices: [
               {
-                entry_id: uid("LED"),
+                invoice_id,
                 business_id: customer.business_id,
                 customer_id: customer.customer_id,
-                type: "charge",
+                customer_name: customer.name,
+                invoice_date: new Date().toISOString().slice(0, 10),
+                due_date: due,
+                total: amount,
+                paid: 0,
+                status: "Unpaid" as InvoiceStatus,
+                line_items: invoiceLines,
+                notes: description || undefined,
+              },
+              ...(Array.isArray(prev.invoices) ? prev.invoices : []),
+            ],
+            ledger: [
+              {
+                entry_id,
+                business_id: customer.business_id,
+                customer_id: customer.customer_id,
+                type: "charge" as const,
                 amount,
-                description,
-                product_id: product?.product_id ?? "",
+                description: description || `Invoice ${invoice_id}`,
+                product_id: productId,
                 qty: qtyUsed,
                 posted_by: prev.currentUserId,
                 date: new Date().toISOString(),
+                line_items: invoiceLines,
+                reference_id: invoice_id,
+                reference_type: "invoice" as const,
+                status: "active" as const,
               },
-              ...prev.ledger,
+              ...(Array.isArray(prev.ledger) ? prev.ledger : []),
             ],
             sales: [
               {
@@ -2479,7 +2584,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
                 total: amount,
                 status: "On tab",
               },
-              ...prev.sales,
+              ...(Array.isArray(prev.sales) ? prev.sales : []),
             ],
           };
         });
@@ -2497,11 +2602,33 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               (b.owner_user_id === user.user_id || user.account_level === "admin"),
           );
           if (!canRecordPayment({ customer, user, isBusinessOwner: owner })) return prev;
-          const paymentAmount = Math.min(Number(customer.amount || 0), amount);
+
+          const balance = Math.max(0, Number(customer.amount || 0));
+          const paymentAmount = balance > 0 ? Math.min(amount, balance) : amount;
           if (paymentAmount <= 0) return prev;
-          const nextAmount = Math.max(0, Number(customer.amount || 0) - paymentAmount);
+
+          const nextAmount = Math.max(0, balance - paymentAmount);
+          const receipt_number = nextReceiptNumber(prev.ledger, customer.business_id);
+          const entry_id = uid("LED");
+          const invoiceId = (form && form.invoiceId) || "";
+          const paymentKind = form && form.paymentKind === "invoice" && invoiceId ? "invoice" : "direct";
+          const lineItems = form && Array.isArray(form.lineItems) ? form.lineItems : undefined;
+
+          let invoices = Array.isArray(prev.invoices) ? prev.invoices : [];
+          if (paymentKind === "invoice" && invoiceId) {
+            invoices = invoices.map((inv) => {
+              if (inv.invoice_id !== invoiceId) return inv;
+              const paid = Number(inv.paid || 0) + paymentAmount;
+              const total = Number(inv.total || 0);
+              const status =
+                paid >= total - 0.001 ? "Paid" : paid > 0 ? "Partial" : inv.status;
+              return { ...inv, paid: Math.min(paid, total), status: status as InvoiceStatus };
+            });
+          }
+
           return {
             ...prev,
+            invoices,
             customers: prev.customers.map((c) =>
               c.customer_id === customer.customer_id
                 ? { ...c, amount: nextAmount, status: dueStatus(c.due_date, nextAmount) }
@@ -2509,16 +2636,379 @@ export function LifeProvider({ children }: { children: ReactNode }) {
             ),
             ledger: [
               {
-                entry_id: uid("LED"),
+                entry_id,
                 business_id: customer.business_id,
                 customer_id: customer.customer_id,
-                type: "payment",
+                type: "payment" as const,
                 amount: paymentAmount,
-                description: form.description || "Payment received",
+                description: (form && form.description) || "Payment received",
+                product_id: lineItems?.[0]?.product_id || "",
+                qty: lineItems?.[0]?.qty || 0,
+                posted_by: prev.currentUserId,
+                date: new Date().toISOString(),
+                receipt_number,
+                invoice_id: invoiceId || undefined,
+                payment_kind: paymentKind as "invoice" | "direct",
+                line_items: lineItems,
+                method: (form && form.method) || undefined,
+                reference_id: invoiceId || undefined,
+                reference_type: invoiceId ? ("invoice" as const) : ("manual" as const),
+                status: "active" as const,
+              },
+              ...(Array.isArray(prev.ledger) ? prev.ledger : []),
+            ],
+          };
+        });
+      },
+      updateCustomerPayment: (form) => {
+        const amount = Number(form.amount || 0);
+        if (amount <= 0 || !form.entryId) return;
+        setState((prev) => {
+          const entry = prev.ledger.find((e) => e.entry_id === form.entryId);
+          if (!entry || entry.type !== "payment" || entry.status === "reversed") return prev;
+          const customer = prev.customers.find((c) => c.customer_id === entry.customer_id);
+          if (!customer) return prev;
+
+          const oldAmount = Number(entry.amount || 0);
+          const delta = amount - oldAmount;
+          const nextCustomerAmount = Math.max(0, Number(customer.amount || 0) - delta);
+
+          let invoices = Array.isArray(prev.invoices) ? prev.invoices : [];
+          if (entry.invoice_id) {
+            invoices = invoices.map((inv) => {
+              if (inv.invoice_id !== entry.invoice_id) return inv;
+              const paid = Math.max(0, Number(inv.paid || 0) + delta);
+              const total = Number(inv.total || 0);
+              const clamped = Math.min(paid, total);
+              const status =
+                clamped >= total - 0.001 ? "Paid" : clamped > 0 ? "Partial" : "Unpaid";
+              return { ...inv, paid: clamped, status: status as InvoiceStatus };
+            });
+          }
+
+          return {
+            ...prev,
+            invoices,
+            customers: prev.customers.map((c) =>
+              c.customer_id === customer.customer_id
+                ? {
+                    ...c,
+                    amount: nextCustomerAmount,
+                    status: dueStatus(c.due_date, nextCustomerAmount),
+                  }
+                : c,
+            ),
+            ledger: prev.ledger.map((e) =>
+              e.entry_id === entry.entry_id
+                ? {
+                    ...e,
+                    previous_amount: oldAmount,
+                    amount,
+                    description: form.description ?? e.description,
+                    method: form.method ?? e.method,
+                    line_items: form.lineItems ?? e.line_items,
+                    invoice_id:
+                      form.invoiceId !== undefined ? form.invoiceId || undefined : e.invoice_id,
+                    payment_kind:
+                      form.paymentKind ||
+                      e.payment_kind ||
+                      (e.invoice_id ? "invoice" : "direct"),
+                    status: "edited" as const,
+                    updated_at: new Date().toISOString(),
+                    updated_by: prev.currentUserId,
+                  }
+                : e,
+            ),
+          };
+        });
+      },
+      reverseCustomerPayment: (entryId: string) => {
+        setState((prev) => {
+          const entry = prev.ledger.find((e) => e.entry_id === entryId);
+          if (!entry || entry.type !== "payment" || entry.status === "reversed") return prev;
+          const customer = prev.customers.find((c) => c.customer_id === entry.customer_id);
+          if (!customer) return prev;
+
+          const restored = Number(customer.amount || 0) + Number(entry.amount || 0);
+          const reverseId = uid("LED");
+          let invoices = Array.isArray(prev.invoices) ? prev.invoices : [];
+          if (entry.invoice_id) {
+            invoices = invoices.map((inv) => {
+              if (inv.invoice_id !== entry.invoice_id) return inv;
+              const paid = Math.max(0, Number(inv.paid || 0) - Number(entry.amount || 0));
+              const total = Number(inv.total || 0);
+              const status =
+                paid >= total - 0.001 ? "Paid" : paid > 0 ? "Partial" : "Unpaid";
+              return { ...inv, paid, status: status as InvoiceStatus };
+            });
+          }
+
+          return {
+            ...prev,
+            invoices,
+            customers: prev.customers.map((c) =>
+              c.customer_id === customer.customer_id
+                ? { ...c, amount: restored, status: dueStatus(c.due_date, restored) }
+                : c,
+            ),
+            ledger: [
+              {
+                entry_id: reverseId,
+                business_id: entry.business_id,
+                customer_id: entry.customer_id,
+                type: "charge" as const,
+                amount: Number(entry.amount || 0),
+                description: `Reversal of ${entry.receipt_number || entry.entry_id}`,
                 product_id: "",
                 qty: 0,
                 posted_by: prev.currentUserId,
                 date: new Date().toISOString(),
+                reverses_entry_id: entry.entry_id,
+                reference_id: entry.entry_id,
+                reference_type: "manual" as const,
+                status: "active" as const,
+              },
+              ...prev.ledger.map((e) =>
+                e.entry_id === entry.entry_id
+                  ? {
+                      ...e,
+                      status: "reversed" as const,
+                      reversed_at: new Date().toISOString(),
+                      reversed_by: prev.currentUserId,
+                      reversed_by_entry_id: reverseId,
+                    }
+                  : e,
+              ),
+            ],
+          };
+        });
+      },
+      deleteCustomerPayment: (entryId: string) => {
+        setState((prev) => {
+          const entry = prev.ledger.find((e) => e.entry_id === entryId);
+          if (!entry || entry.type !== "payment") return prev;
+          let customers = prev.customers;
+          let invoices = Array.isArray(prev.invoices) ? prev.invoices : [];
+          if (entry.status !== "reversed") {
+            const customer = prev.customers.find((c) => c.customer_id === entry.customer_id);
+            if (customer) {
+              const restored = Number(customer.amount || 0) + Number(entry.amount || 0);
+              customers = prev.customers.map((c) =>
+                c.customer_id === customer.customer_id
+                  ? { ...c, amount: restored, status: dueStatus(c.due_date, restored) }
+                  : c,
+              );
+            }
+            if (entry.invoice_id) {
+              invoices = invoices.map((inv) => {
+                if (inv.invoice_id !== entry.invoice_id) return inv;
+                const paid = Math.max(0, Number(inv.paid || 0) - Number(entry.amount || 0));
+                const total = Number(inv.total || 0);
+                const status =
+                  paid >= total - 0.001 ? "Paid" : paid > 0 ? "Partial" : "Unpaid";
+                return { ...inv, paid, status: status as InvoiceStatus };
+              });
+            }
+          }
+          return {
+            ...prev,
+            customers,
+            invoices,
+            ledger: prev.ledger.filter(
+              (e) => e.entry_id !== entryId && e.reverses_entry_id !== entryId,
+            ),
+          };
+        });
+      },
+      addInvoice: (form: {
+        customerId: string;
+        total: string | number;
+        due: string;
+        invoice_date?: string;
+        lineItems?: import("./types").PaymentLineItem[];
+      }) => {
+        setState((prev) => {
+          const customer = prev.customers.find((c) => c.customer_id === form.customerId);
+          if (!customer) return prev;
+          const lineItems = Array.isArray(form.lineItems) ? form.lineItems : undefined;
+          const fromLines = lineItems?.length
+            ? lineItems.reduce((s, li) => s + Number(li.amount || 0), 0)
+            : 0;
+          const total = fromLines > 0 ? fromLines : Number(form.total || 0);
+          if (total <= 0) return prev;
+          const invoice_id = uid("INV");
+          return {
+            ...prev,
+            invoices: [
+              {
+                invoice_id,
+                business_id: customer.business_id,
+                customer_id: customer.customer_id,
+                customer_name: customer.name,
+                invoice_date: form.invoice_date || new Date().toISOString().slice(0, 10),
+                due_date: form.due,
+                total,
+                paid: 0,
+                status: "Unpaid" as InvoiceStatus,
+                line_items: lineItems,
+              },
+              ...(Array.isArray(prev.invoices) ? prev.invoices : []),
+            ],
+          };
+        });
+      },
+      updateInvoice: (invoiceId: string, form: {
+        total?: string | number;
+        due?: string;
+        invoice_date?: string;
+        notes?: string;
+        lineItems?: import("./types").PaymentLineItem[];
+        customerId?: string;
+      }) => {
+        setState((prev) => {
+          const inv = (prev.invoices || []).find((i) => i.invoice_id === invoiceId);
+          if (!inv) return prev;
+          const lineItems = Array.isArray(form.lineItems) ? form.lineItems : inv.line_items;
+          const fromLines = lineItems?.length
+            ? lineItems.reduce((s, li) => s + Number(li.amount || 0), 0)
+            : 0;
+          const total =
+            fromLines > 0
+              ? fromLines
+              : form.total !== undefined
+                ? Number(form.total || 0)
+                : Number(inv.total || 0);
+          const paid = Number(inv.paid || 0);
+          const status =
+            paid >= total - 0.001 && total > 0
+              ? ("Paid" as InvoiceStatus)
+              : paid > 0
+                ? ("Partial" as InvoiceStatus)
+                : ("Unpaid" as InvoiceStatus);
+          const customer =
+            form.customerId
+              ? prev.customers.find((c) => c.customer_id === form.customerId)
+              : prev.customers.find((c) => c.customer_id === inv.customer_id);
+          // Adjust customer tab if unpaid portion of total changed
+          const oldUnpaid = Math.max(0, Number(inv.total || 0) - paid);
+          const newUnpaid = Math.max(0, total - paid);
+          const delta = newUnpaid - oldUnpaid;
+          let customers = prev.customers;
+          if (customer && delta !== 0) {
+            const nextAmt = Math.max(0, Number(customer.amount || 0) + delta);
+            customers = prev.customers.map((c) =>
+              c.customer_id === customer.customer_id
+                ? { ...c, amount: nextAmt, status: dueStatus(c.due_date, nextAmt) }
+                : c,
+            );
+          }
+          return {
+            ...prev,
+            customers,
+            invoices: (prev.invoices || []).map((i) =>
+              i.invoice_id === invoiceId
+                ? {
+                    ...i,
+                    total,
+                    paid,
+                    status,
+                    due_date: form.due ?? i.due_date,
+                    invoice_date: form.invoice_date ?? i.invoice_date,
+                    notes: form.notes !== undefined ? form.notes : i.notes,
+                    line_items: lineItems,
+                    customer_id: customer?.customer_id ?? i.customer_id,
+                    customer_name: customer?.name ?? i.customer_name,
+                  }
+                : i,
+            ),
+          };
+        });
+      },
+      deleteInvoice: (invoiceId: string) => {
+        setState((prev) => {
+          const inv = (prev.invoices || []).find((i) => i.invoice_id === invoiceId);
+          if (!inv) return prev;
+          const unpaid = Math.max(0, Number(inv.total || 0) - Number(inv.paid || 0));
+          let customers = prev.customers;
+          if (unpaid > 0) {
+            const customer = prev.customers.find((c) => c.customer_id === inv.customer_id);
+            if (customer) {
+              const nextAmt = Math.max(0, Number(customer.amount || 0) - unpaid);
+              customers = prev.customers.map((c) =>
+                c.customer_id === customer.customer_id
+                  ? { ...c, amount: nextAmt, status: dueStatus(c.due_date, nextAmt) }
+                  : c,
+              );
+            }
+          }
+          return {
+            ...prev,
+            customers,
+            invoices: (prev.invoices || []).filter((i) => i.invoice_id !== invoiceId),
+            // Keep payment ledger history; only drop the charge row linked to this invoice if unpaid
+            ledger: (prev.ledger || []).filter(
+              (e) =>
+                !(
+                  e.type === "charge" &&
+                  e.reference_type === "invoice" &&
+                  e.reference_id === invoiceId &&
+                  Number(inv.paid || 0) <= 0
+                ),
+            ),
+          };
+        });
+      },
+      recordInvoicePayment: (invoiceId: string, amountIn: number | string) => {
+        const amount = Number(amountIn || 0);
+        if (amount <= 0) return;
+        setState((prev) => {
+          const inv = prev.invoices.find((i) => i.invoice_id === invoiceId);
+          if (!inv) return prev;
+          const customer = prev.customers.find((c) => c.customer_id === inv.customer_id);
+          const due = Math.max(0, Number(inv.total || 0) - Number(inv.paid || 0));
+          const paymentAmount = due > 0 ? Math.min(amount, due) : amount;
+          if (paymentAmount <= 0) return prev;
+          const paid = Number(inv.paid || 0) + paymentAmount;
+          const total = Number(inv.total || 0);
+          const status =
+            paid >= total - 0.001 ? "Paid" : paid > 0 ? "Partial" : inv.status;
+          const receipt_number = nextReceiptNumber(prev.ledger, inv.business_id);
+          let customers = prev.customers;
+          if (customer && Number(customer.amount || 0) > 0) {
+            const nextAmount = Math.max(0, Number(customer.amount || 0) - paymentAmount);
+            customers = prev.customers.map((c) =>
+              c.customer_id === customer.customer_id
+                ? { ...c, amount: nextAmount, status: dueStatus(c.due_date, nextAmount) }
+                : c,
+            );
+          }
+          return {
+            ...prev,
+            customers,
+            invoices: prev.invoices.map((i) =>
+              i.invoice_id === invoiceId
+                ? { ...i, paid: Math.min(paid, total), status: status as InvoiceStatus }
+                : i,
+            ),
+            ledger: [
+              {
+                entry_id: uid("LED"),
+                business_id: inv.business_id,
+                customer_id: inv.customer_id,
+                type: "payment" as const,
+                amount: paymentAmount,
+                description: `Invoice payment ${inv.invoice_id}`,
+                product_id: inv.line_items?.[0]?.product_id || "",
+                qty: inv.line_items?.[0]?.qty || 0,
+                posted_by: prev.currentUserId,
+                date: new Date().toISOString(),
+                receipt_number,
+                invoice_id: inv.invoice_id,
+                payment_kind: "invoice" as const,
+                line_items: inv.line_items,
+                reference_id: inv.invoice_id,
+                reference_type: "invoice" as const,
+                status: "active" as const,
               },
               ...prev.ledger,
             ],

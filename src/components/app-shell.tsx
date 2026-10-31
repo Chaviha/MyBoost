@@ -77,7 +77,6 @@ const NAV: NavGroup[] = [
       { to: "/employees", label: "Team", icon: BriefcaseBusiness, perm: "manage_employees" },
       { to: "/catalogue", label: "Catalogue", icon: Boxes, perm: "view_products" },
       { to: "/quotations", label: "Quotations", icon: ListChecks, perm: "manage_quotes" },
-      { to: "/invoices", label: "Invoices", icon: CreditCard, perm: "manage_quotes" },
       { to: "/jobs", label: "Jobs", icon: ClipboardList, perm: "manage_jobs" },
       { to: "/sales", label: "Sales", icon: Wallet, perm: "manage_sales" },
       { to: "/expenses", label: "Expenses", icon: Receipt, perm: "manage_expenses" },
@@ -127,7 +126,6 @@ const GROUP_PATHS: Record<string, string[]> = {
     "/inventory",
     "/pricing",
     "/quotations",
-    "/invoices",
     "/jobs",
     "/sales",
     "/expenses",
@@ -165,7 +163,6 @@ const BUSINESS_PAGES = new Set([
   "/inventory",
   "/expenses",
   "/quotations",
-  "/invoices",
   "/jobs",
   "/offers",
 ]);

@@ -56,6 +56,14 @@ async function removeUpload(key, localPath) {
 // After moving to R2, older records may still point at /uploads/... files that were lost
 // when the container disk reset. Treat those as empty so a new R2 upload becomes the cover image.
 const isStaleLocalUpload = (url) => r2Enabled && String(url || "").startsWith("/uploads/");
+/** Marketplace listings require a real cover image (image_url or an image in gallery). */
+const hasCoverImage = (item) => {
+  const url = String(item?.image_url || "").trim();
+  if (url && !isStaleLocalUpload(url)) return true;
+  const gallery = Array.isArray(item?.gallery) ? item.gallery : [];
+  return gallery.some((m) => m && m.media_type !== "video" && String(m.url || "").trim() && !isStaleLocalUpload(m.url));
+};
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadRoot = path.join(__dirname, "..", "uploads", "businesses");
@@ -678,7 +686,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
     for (const row of result.rows) {
       const state = row.state || {};
       const allBusinesses = Array.isArray(state.businesses) ? state.businesses : [];
-      const listedBusinesses = allBusinesses.filter((b) => b?.listed && !demoBusinessIds.has(b.business_id) && !demoBusinessNames.has(b.business_name));
+      const listedBusinesses = allBusinesses.filter((b) => b?.listed && hasCoverImage(b) && !demoBusinessIds.has(b.business_id) && !demoBusinessNames.has(b.business_name));
       for (const business of listedBusinesses) {
         businesses.push({
           business_id: business.business_id,
@@ -697,7 +705,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
 
       const businessMap = new Map(listedBusinesses.map((b) => [b.business_id, b.business_name]));
       for (const employee of Array.isArray(state.employees) ? state.employees : []) {
-        if (employee?.listed && businessMap.has(employee.business_id)) {
+        if (employee?.listed && hasCoverImage(employee) && businessMap.has(employee.business_id)) {
           professionals.push({
             employee_id: employee.employee_id,
             name: employee.name,
@@ -714,7 +722,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
         }
       }
       for (const asset of Array.isArray(state.assets) ? state.assets : []) {
-        if (asset?.listed) {
+        if (asset?.listed && hasCoverImage(asset)) {
           assets.push({
             asset_id: asset.asset_id,
             name: asset.name,
@@ -736,7 +744,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
       const listedById = new Map(listedBusinesses.map((b) => [b.business_id, b]));
       for (const product of Array.isArray(state.products) ? state.products : []) {
         const owner = listedById.get(product?.business_id);
-        if (!owner || product.status === "inactive" || demoProductIds.has(product.product_id)) continue;
+        if (!owner || product.status === "inactive" || demoProductIds.has(product.product_id) || !hasCoverImage(product)) continue;
         listings.push({
           product_id: product.product_id,
           business_id: product.business_id,
@@ -1627,9 +1635,17 @@ app.post("/api/customers/payment-sync", auth, async (req, res, next) => {
         entry_id: entryId, business_id: businessId, customer_id: ownerTab.customer_id,
         type: "payment", amount: paid,
         description: String(payment.description || "Payment recorded by customer"),
-        product_id: "", qty: 0, posted_by: req.user.id,
+        product_id: String(payment.product_id || (Array.isArray(payment.line_items) && payment.line_items[0]?.product_id) || ""),
+        qty: Number(payment.qty || (Array.isArray(payment.line_items) && payment.line_items[0]?.qty) || 0),
+        posted_by: req.user.id,
         date: String(payment.date || new Date().toISOString()),
         via: "customer-sync",
+        receipt_number: payment.receipt_number ? String(payment.receipt_number) : undefined,
+        invoice_id: payment.invoice_id ? String(payment.invoice_id) : undefined,
+        payment_kind: payment.payment_kind === "invoice" ? "invoice" : "direct",
+        line_items: Array.isArray(payment.line_items) ? payment.line_items.slice(0, 50) : undefined,
+        method: payment.method ? String(payment.method).slice(0, 40) : undefined,
+        status: "active",
       });
       await client.query("UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2", [JSON.stringify(ownerState), ownerId]);
       applied += 1;
