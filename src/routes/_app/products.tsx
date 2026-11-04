@@ -49,26 +49,16 @@ function itemCoverUrl(p: { image_url?: string; gallery?: { url: string; media_ty
 }
 
 export const Route = createFileRoute("/_app/products")({
-  // ?builder=1 opens the spreadsheet product builder (used by "Open Product customizer" in quotations).
-  validateSearch: (search: Record<string, unknown>) => ({
-    builder: search.builder === 1 || search.builder === "1" ? (1 as const) : undefined,
-  }),
+
   component: ProductsPage,
 });
 
 function ProductsPage() {
-  const { builder } = Route.useSearch();
-  return <CatalogueItemsPage itemKind="product" openBuilderOnLoad={builder === 1} />;
+  return <CatalogueItemsPage itemKind="product" />;
 }
 
 /** Shared catalogue UI for stocked products and offered services. */
-export function CatalogueItemsPage({
-  itemKind,
-  openBuilderOnLoad = false,
-}: {
-  itemKind: "product" | "service";
-  openBuilderOnLoad?: boolean;
-}) {
+export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "service" }) {
   const isService = itemKind === "service";
   const {
 
@@ -90,7 +80,7 @@ export function CatalogueItemsPage({
   const [chooserOpen, setChooserOpen] = useState(false);
   const [open, setOpen] = useState(false);
   const [listOpen, setListOpen] = useState(false);
-  const [builderOpen, setBuilderOpen] = useState(openBuilderOnLoad && itemKind === "product");
+  const [builderOpen, setBuilderOpen] = useState(false);
   const [customizerEditId, setCustomizerEditId] = useState<string | null>(null);
   const [familyFilter, setFamilyFilter] = useState("");
   const [importOpen, setImportOpen] = useState(false);
