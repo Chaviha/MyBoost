@@ -1,58 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import { Calculator, Package, ArrowDownToLine, ArrowUpRight, Search } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Calculator, Package, ArrowDownToLine, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Field } from "@/components/field";
 import { money, uid } from "@/lib/format";
+import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { Product, ProductCustomizerConfig, QuoteLineItem } from "@/lib/types";
 
-function evaluateArithmetic(expression: string): number {
-  const tokens = expression.match(/\d+(?:\.\d+)?|[()+\-*/]/g) ?? [];
-  if (tokens.join("") !== expression.replace(/\s/g, "")) {
-    throw new Error("Use numbers, +, -, *, / and parentheses only.");
-  }
-  let index = 0;
-  function factor(): number {
-    const token = tokens[index++];
-    if (token === "+" || token === "-") {
-      const n = factor();
-      return token === "-" ? -n : n;
-    }
-    if (token === "(") {
-      const n = expressionValue();
-      if (tokens[index++] !== ")") throw new Error("Missing closing parenthesis.");
-      return n;
-    }
-    const n = Number(token);
-    if (!Number.isFinite(n)) throw new Error("Invalid formula.");
-    return n;
-  }
-  function term(): number {
-    let n = factor();
-    while (tokens[index] === "*" || tokens[index] === "/") {
-      const op = tokens[index++];
-      const rhs = factor();
-      if (op === "/" && rhs === 0) throw new Error("Cannot divide by zero.");
-      n = op === "*" ? n * rhs : n / rhs;
-    }
-    return n;
-  }
-  function expressionValue(): number {
-    let n = term();
-    while (tokens[index] === "+" || tokens[index] === "-") {
-      const op = tokens[index++];
-      const rhs = term();
-      n = op === "+" ? n + rhs : n - rhs;
-    }
-    return n;
-  }
-  const result = expressionValue();
-  if (index !== tokens.length || !Number.isFinite(result)) throw new Error("Invalid formula.");
-  return result;
-}
+/* evaluateArithmetic imported from @/lib/formula-eval */
 
 function evaluateFormulas(
   cells: Record<string, string | number | null>,
@@ -90,95 +47,20 @@ function evaluateFormulas(
   }
 }
 
-const OpenCustomizerButton = ({ onClick }: { onClick?: () => void }) =>
-  onClick ? (
-    <Button type="button" size="sm" variant="outline" onClick={onClick} className="shrink-0">
-      Open Product customizer <ArrowUpRight className="ml-1 size-3.5" />
-    </Button>
-  ) : null;
-
-/** A customizer product from any business (own or another business's catalogue). */
-type CustomizerProduct = Pick<
-  Product,
-  "product_id" | "business_id" | "name" | "category" | "unit" | "selling_price" | "customizer"
-> & { sku?: string; business_name: string };
-
 type Props = {
-  /** Products of the business you are logged in as. */
   products: Product[];
-  ownBusinessName?: string;
   onAdd: (item: QuoteLineItem) => void;
-  /** Opens the product builder on the Products page so a new customizer product can be built. */
-  onOpenCustomizer?: () => void;
 };
-
-const hasCustomizer = (p: { customizer?: ProductCustomizerConfig }) =>
-  Boolean(p.customizer?.unlocked?.length || p.customizer?.columns?.length);
 
 /**
  * Quote from a product-customizer catalogue item using different unlocked inputs.
  * Does not change the saved product — only builds a quotation line.
- * Products can come from your own catalogue or any other business's catalogue.
  */
-export function CustomizerQuoteBuilder({ products, ownBusinessName, onAdd, onOpenCustomizer }: Props) {
-  const [remote, setRemote] = useState<CustomizerProduct[]>([]);
-  const [loadingRemote, setLoadingRemote] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/quotation/customizer-products", {
-          credentials: "include",
-          cache: "no-store",
-        });
-        if (res.ok) {
-          const json = await res.json();
-          if (!cancelled) setRemote(Array.isArray(json.products) ? json.products : []);
-        }
-      } catch {
-        // Offline / not signed in: fall back to your own products only.
-      } finally {
-        if (!cancelled) setLoadingRemote(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const customizerProducts = useMemo<CustomizerProduct[]>(() => {
-    const own = products.filter(hasCustomizer).map((p) => ({
-      product_id: p.product_id,
-      business_id: p.business_id,
-      business_name: ownBusinessName || "My business",
-      name: p.name,
-      category: p.category,
-      sku: p.sku,
-      unit: p.unit,
-      selling_price: p.selling_price,
-      customizer: p.customizer,
-    }));
-    const ownIds = new Set(own.map((p) => p.product_id));
-    return [...own, ...remote.filter((p) => hasCustomizer(p) && !ownIds.has(p.product_id))];
-  }, [products, remote, ownBusinessName]);
-
-  const ownBusinessId = products[0]?.business_id || "";
-  const businesses = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; count: number }>();
-    for (const p of customizerProducts) {
-      const cur = map.get(p.business_id);
-      if (cur) cur.count++;
-      else map.set(p.business_id, { id: p.business_id, name: p.business_name || "Business", count: 1 });
-    }
-    return Array.from(map.values()).sort(
-      (a, b) => Number(b.id === ownBusinessId) - Number(a.id === ownBusinessId) || a.name.localeCompare(b.name),
-    );
-  }, [customizerProducts, ownBusinessId]);
-
-  // null = not chosen yet: default to your own catalogue when it has customizer products, else all businesses.
-  const [businessPick, setBusinessPick] = useState<string | null>(null);
-  const businessId = businessPick ?? (businesses.some((b) => b.id === ownBusinessId) ? ownBusinessId : "");
+export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
+  const customizerProducts = useMemo(
+    () => products.filter((p) => p.customizer?.unlocked?.length || p.customizer?.columns?.length),
+    [products],
+  );
 
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string>("");
@@ -190,17 +72,16 @@ export function CustomizerQuoteBuilder({ products, ownBusinessName, onAdd, onOpe
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
+    if (!q) return customizerProducts;
     return customizerProducts.filter(
       (p) =>
-        (!businessId || p.business_id === businessId) &&
-        (!q ||
-          p.name.toLowerCase().includes(q) ||
-          (p.category && p.category.toLowerCase().includes(q)) ||
-          (p.sku && p.sku.toLowerCase().includes(q))),
+        p.name.toLowerCase().includes(q) ||
+        (p.category && p.category.toLowerCase().includes(q)) ||
+        (p.sku && p.sku.toLowerCase().includes(q)),
     );
-  }, [customizerProducts, query, businessId]);
+  }, [customizerProducts, query]);
 
-  function pickProduct(p: CustomizerProduct) {
+  function pickProduct(p: Product) {
     setSelectedId(p.product_id);
     setCells({ ...(p.customizer?.cells || {}) });
     setQty("1");
@@ -245,7 +126,6 @@ export function CustomizerQuoteBuilder({ products, ownBusinessName, onAdd, onOpe
       customized: true,
       source_product_id: selected.product_id,
       source_business_id: selected.business_id,
-      source_business_name: selected.business_name,
       meta: {
         calculator: "customizer-quote",
         product_id: selected.product_id,
@@ -266,7 +146,7 @@ export function CustomizerQuoteBuilder({ products, ownBusinessName, onAdd, onOpe
 
   if (!customizerProducts.length) {
     return (
-      <Card className="mb-4 space-y-3 p-4">
+      <Card className="mb-4 space-y-2 p-4">
         <div className="flex items-start gap-3">
           <div className="rounded-lg bg-leaf/50 p-2">
             <Calculator className="size-5" />
@@ -274,54 +154,31 @@ export function CustomizerQuoteBuilder({ products, ownBusinessName, onAdd, onOpe
           <div>
             <p className="font-semibold">Quote from customizer product</p>
             <p className="text-xs text-ink-muted">
-              {loadingRemote
-                ? "Loading customizer products from all businesses…"
-                : "No customizer products yet. Build one under Products → Add product → Spreadsheet product builder, then return here to quote with different inputs."}
+              No products built with the Product customizer yet. Create one under Products → Spreadsheet
+              product builder (or the Product customizer quote type), then return here to quote with
+              different inputs.
             </p>
           </div>
         </div>
-        {!loadingRemote ? <OpenCustomizerButton onClick={onOpenCustomizer} /> : null}
       </Card>
     );
   }
 
   return (
     <Card className="mb-4 space-y-4 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <div className="rounded-lg bg-leaf/50 p-2">
-            <Calculator className="size-5" />
-          </div>
-          <div>
-            <p className="font-semibold">Quote from customizer product</p>
-            <p className="text-xs text-ink-muted">
-              Pick a catalogue product built with the spreadsheet customizer, change unlocked inputs
-              (sizes, qty factors, rates), and add the recalculated line to this quotation. The saved
-              product is not modified.
-            </p>
-          </div>
+      <div className="flex items-start gap-3">
+        <div className="rounded-lg bg-leaf/50 p-2">
+          <Calculator className="size-5" />
         </div>
-        <OpenCustomizerButton onClick={onOpenCustomizer} />
+        <div>
+          <p className="font-semibold">Quote from customizer product</p>
+          <p className="text-xs text-ink-muted">
+            Pick a catalogue product built with the spreadsheet customizer, change unlocked inputs
+            (sizes, qty factors, rates), and add the recalculated line to this quotation. The saved
+            product is not modified.
+          </p>
+        </div>
       </div>
-
-      <Field label="Catalogue" hint="whose customized products to use">
-        <Select
-          value={businessId}
-          onChange={(e) => {
-            setBusinessPick(e.target.value);
-            setSelectedId("");
-          }}
-        >
-          <option value="">All businesses ({customizerProducts.length})</option>
-          {businesses.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-              {b.id === ownBusinessId ? " (my business)" : ""} · {b.count}
-            </option>
-          ))}
-        </Select>
-        {loadingRemote ? <span className="mt-1 block text-xs text-ink-muted">Loading other businesses…</span> : null}
-      </Field>
 
       <Field label="Search customizer products">
         <div className="relative">
@@ -350,7 +207,6 @@ export function CustomizerQuoteBuilder({ products, ownBusinessName, onAdd, onOpe
               <span className="block text-xs text-ink-muted">
                 {p.category || "General"}
                 {p.sku ? ` · ${p.sku}` : ""}
-                {!businessId ? ` · ${p.business_name}` : ""}
               </span>
             </span>
             <span className="shrink-0 tabular-nums text-ink-muted">{money(p.selling_price)}</span>
