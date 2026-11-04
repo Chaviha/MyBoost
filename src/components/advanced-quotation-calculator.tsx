@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field } from "@/components/field";
 import { money, uid } from "@/lib/format";
+import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { MarketplaceProduct, QuoteLineItem, Product } from "@/lib/types";
 
 /** Column data types the product creator / quoter can choose. */
@@ -68,50 +69,7 @@ function slugKey(label: string, existing: string[]): string {
 }
 
 /** Safe arithmetic evaluator — numbers, + - * / ( ) only. */
-function evaluateArithmetic(expression: string): number {
-  const tokens = expression.match(/\d+(?:\.\d+)?|[()+\-*/]/g) ?? [];
-  if (tokens.join("") !== expression.replace(/\s/g, "")) {
-    throw new Error("Use numbers, +, -, *, / and parentheses only.");
-  }
-  let index = 0;
-  function factor(): number {
-    const token = tokens[index++];
-    if (token === "+" || token === "-") {
-      const n = factor();
-      return token === "-" ? -n : n;
-    }
-    if (token === "(") {
-      const n = expressionValue();
-      if (tokens[index++] !== ")") throw new Error("Missing closing parenthesis.");
-      return n;
-    }
-    const n = Number(token);
-    if (!Number.isFinite(n)) throw new Error("Invalid formula.");
-    return n;
-  }
-  function term(): number {
-    let n = factor();
-    while (tokens[index] === "*" || tokens[index] === "/") {
-      const op = tokens[index++];
-      const rhs = factor();
-      if (op === "/" && rhs === 0) throw new Error("Cannot divide by zero.");
-      n = op === "*" ? n * rhs : n / rhs;
-    }
-    return n;
-  }
-  function expressionValue(): number {
-    let n = term();
-    while (tokens[index] === "+" || tokens[index] === "-") {
-      const op = tokens[index++];
-      const rhs = term();
-      n = op === "+" ? n + rhs : n - rhs;
-    }
-    return n;
-  }
-  const result = expressionValue();
-  if (index !== tokens.length || !Number.isFinite(result)) throw new Error("Invalid formula.");
-  return result;
-}
+/* evaluateArithmetic imported from @/lib/formula-eval */
 
 function evaluateRowFormula(
   formula: string,
@@ -801,10 +759,12 @@ export function AdvancedQuotationCalculator({
           <p className="text-xs text-ink-muted">
             Formula columns work like the Excel calculator: set a default formula on the column,
             then edit each row&apos;s formula in the grid (e.g. <code>=QTY*RATE</code>,{" "}
-            <code>=(QTY*RATE)*1.16</code>, <code>=LENGTH*WIDTH*RATE</code>). Supported operators:{" "}
-            + − × ÷ and parentheses. Catalogue columns let you pick a product to fill rate and
-            description. Size columns can be locked by the product creator so quoters only change
-            allowed dimensions.
+            <code>=IF(QTY&gt;10,RATE*0.9,RATE)</code>, <code>=SINDEG(ANGLE)*LENGTH</code>).
+            Supports + − × ÷, parentheses, <code>SIN/COS/TAN</code> (radians),{" "}
+            <code>SINDEG/COSDEG/TANDEG</code> (degrees), <code>IF(cond,then,else)</code>,{" "}
+            <code>AND/OR/NOT</code>, <code>ABS/SQRT/MIN/MAX/ROUND</code>, <code>PI()</code>.
+            Catalogue columns pick products for rate/description. Size columns can be locked by the
+            product creator.
           </p>
         </div>
       )}
