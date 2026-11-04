@@ -20,12 +20,9 @@ import {
 import { getCatalogueTemplate } from "./catalogue-templates";
 import { buildSeed } from "./seed";
 import { calculateQuotation } from "./pricing-engine";
-import { DEFAULT_DXF_RULES } from "./dxf-calc";
 
 const LifeContext = createContext<any>(null);
 import type {
-  DxfCutRule,
-  DxfRuleDraft,
   AccountLevel,
   Asset,
   Business,
@@ -218,10 +215,6 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     next.labour_rates = Array.isArray(next.labour_rates) ? next.labour_rates : [];
     next.transport_rates = Array.isArray(next.transport_rates) ? next.transport_rates : [];
     next.pricing_settings = Array.isArray(next.pricing_settings) ? next.pricing_settings : [];
-    // DXF cut pricing list: seed the default rows once per business (never re-seeded after
-    // the user edits or clears them, because the array then already exists).
-    const firstDxfMigration = !Array.isArray(next.dxf_cut_rules);
-    next.dxf_cut_rules = Array.isArray(next.dxf_cut_rules) ? next.dxf_cut_rules : [];
     next.products = (next.products || []).map((p) => ({
       ...p,
       item_kind: p.item_kind === "service" ? "service" : "product",
@@ -244,16 +237,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       sku: v.sku || "",
     }));
     for (const business of next.businesses || []) {
-      const newBusiness = !next.pricing_settings.some((x) => x.business_id === business.business_id);
-      if (
-        (firstDxfMigration || newBusiness) &&
-        !next.dxf_cut_rules.some((r) => r.business_id === business.business_id)
-      ) {
-        for (const d of DEFAULT_DXF_RULES) {
-          next.dxf_cut_rules.push({ ...d, rule_id: uid("DXR"), business_id: business.business_id });
-        }
-      }
-      if (newBusiness) {
+      if (!next.pricing_settings.some((x) => x.business_id === business.business_id)) {
         next.pricing_settings.push({
           business_id: business.business_id,
           default_markup_percent: 20,
@@ -640,7 +624,6 @@ export function LifeProvider({ children }: { children: ReactNode }) {
     const businessPriceHistory = (state.price_history || []).filter((x) => x.business_id === bid);
     const businessLabourRates = (state.labour_rates || []).filter((x) => x.business_id === bid);
     const businessTransportRates = (state.transport_rates || []).filter((x) => x.business_id === bid);
-    const businessDxfRules = (state.dxf_cut_rules || []).filter((x) => x.business_id === bid);
     const pricingSettings = (state.pricing_settings || []).find((x) => x.business_id === bid) || {
       business_id: bid,
       default_markup_percent: 20,
@@ -758,7 +741,6 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       businessPriceHistory,
       businessLabourRates,
       businessTransportRates,
-      businessDxfRules,
       pricingSettings,
       businessExpenses,
       businessJobs,
@@ -841,7 +823,6 @@ export function LifeProvider({ children }: { children: ReactNode }) {
             price_history: (prev.price_history || []).filter((x) => x.business_id !== businessId),
             labour_rates: (prev.labour_rates || []).filter((x) => x.business_id !== businessId),
             transport_rates: (prev.transport_rates || []).filter((x) => x.business_id !== businessId),
-            dxf_cut_rules: (prev.dxf_cut_rules || []).filter((x) => x.business_id !== businessId),
             pricing_settings: (prev.pricing_settings || []).filter((x) => x.business_id !== businessId),
             jobs: prev.jobs.filter((x) => x.business_id !== businessId),
             quotations: prev.quotations.filter((x) => x.business_id !== businessId),
@@ -928,50 +909,6 @@ export function LifeProvider({ children }: { children: ReactNode }) {
             pricing_settings: [
               next,
               ...(prev.pricing_settings || []).filter((x) => x.business_id !== bid),
-            ],
-          };
-        });
-      },
-      addDxfRule: (draft?: Partial<DxfRuleDraft>) => {
-        setState((prev) => ({
-          ...prev,
-          dxf_cut_rules: [
-            ...(prev.dxf_cut_rules || []),
-            {
-              material: "",
-              thickness: 0,
-              pierce_cost: 0,
-              cut_rate: null,
-              cut_speed: null,
-              description: "",
-              ...draft,
-              rule_id: uid("DXR"),
-              business_id: prev.selectedBusinessId,
-            } as DxfCutRule,
-          ],
-        }));
-      },
-      updateDxfRule: (id: string, patch: Partial<DxfRuleDraft>) => {
-        setState((prev) => ({
-          ...prev,
-          dxf_cut_rules: (prev.dxf_cut_rules || []).map((r) => (r.rule_id === id ? { ...r, ...patch } : r)),
-        }));
-      },
-      deleteDxfRule: (id: string) => {
-        setState((prev) => ({
-          ...prev,
-          dxf_cut_rules: (prev.dxf_cut_rules || []).filter((r) => r.rule_id !== id),
-        }));
-      },
-      /** Replace the selected business's whole DXF pricing list (Excel import / reset to defaults). */
-      replaceDxfRules: (drafts: DxfRuleDraft[]) => {
-        setState((prev) => {
-          const bid = prev.selectedBusinessId;
-          return {
-            ...prev,
-            dxf_cut_rules: [
-              ...(prev.dxf_cut_rules || []).filter((r) => r.business_id !== bid),
-              ...drafts.map((d) => ({ ...d, rule_id: uid("DXR"), business_id: bid })),
             ],
           };
         });
