@@ -34,5 +34,6 @@ export function buildSeed(): LifeState {
     labour_rates: [],
     transport_rates: [],
     pricing_settings: [],
+    dxf_cut_rules: [],
   };
 }

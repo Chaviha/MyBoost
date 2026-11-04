@@ -58,6 +58,26 @@ export type PricingSettings = {
   require_quote_approval: boolean;
 };
 
+/** One row of the DXF cut pricing list (same columns as the PricingRules Excel sheet). */
+export type DxfCutRule = {
+  rule_id: string;
+  business_id: string;
+  /** Free text, e.g. "mild", "stainless", "aluminum", "brass" or anything you add. */
+  material: string;
+  /** Thickness tier in mm. A job uses the smallest tier that is >= its thickness. */
+  thickness: number;
+  /** KSh per pierce (start of each cut). */
+  pierce_cost: number;
+  /** KSh per mm of cut path. null = not filled in yet. */
+  cut_rate: number | null;
+  /** Cutting speed in mm/min (used for the time estimate). null = unknown. */
+  cut_speed: number | null;
+  /** Assist gas / notes, e.g. "oxygen", "compressed air". */
+  description: string;
+};
+
+export type DxfRuleDraft = Omit<DxfCutRule, "rule_id" | "business_id">;
+
 export type JobResourceUsage = {
   resource_id: string;
   product_id?: string;
@@ -349,6 +369,34 @@ export type Product = {
    * quotation — any sector, not just this product's own business — via the public
    * marketplace endpoint. */
   listed?: boolean;
+  /**
+   * Spreadsheet product customizer config. When present, catalogue users can open
+   * a card and edit unlocked fields (sizes, qty, rates, etc.) and refresh costing.
+   */
+  customizer?: ProductCustomizerConfig;
+};
+
+/** Column / unlock config saved with a product built via the spreadsheet customizer. */
+export type ProductCustomizerColumn = {
+  key: string;
+  label: string;
+  type: "text" | "number" | "catalogue" | "formula" | "size";
+  formula?: string;
+  editableByQuoter: boolean;
+  unit?: string;
+  sizeLocked?: boolean;
+};
+
+export type ProductCustomizerConfig = {
+  calculator: "advanced-spreadsheet";
+  columns: ProductCustomizerColumn[];
+  /** Current cell values keyed by column key (typically first / primary row). */
+  cells: Record<string, string | number | null>;
+  /** Per-column formulas (may override column defaults). */
+  formulas?: Record<string, string>;
+  /** Fields the creator left unlocked for later editing. */
+  unlocked: Array<{ key: string; label: string; type: string; unit?: string }>;
+  total?: number;
 };
 
 /**
@@ -421,7 +469,15 @@ export type Job = {
   status_updated_by?: string;
 };
 
-export type QuoteType = "general" | "steel" | "dxf_cut" | "concrete" | "custom_product";
+export type QuoteType =
+  | "general"
+  | "steel"
+  | "dxf_cut"
+  | "concrete"
+  | "custom_product"
+  | "custom_calculator"
+  | "product_customizer"
+  | "customizer_quote";
 
 export type QuoteLineItem = {
   line_id: string;
@@ -549,6 +605,7 @@ export type LifeState = {
   labour_rates: LabourRate[];
   transport_rates: TransportRate[];
   pricing_settings: PricingSettings[];
+  dxf_cut_rules: DxfCutRule[];
 };
 
 export type EnrichedBusiness = Business & {

@@ -793,6 +793,41 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
   }
 });
 
+// Customizer products from every business, for the "Reuse customizer product" quotation.
+// Login required: unlike the public marketplace feed this includes each product's costing
+// formulas and unlocked inputs (needed to recalculate), so it is never exposed anonymously.
+app.get("/api/quotation/customizer-products", auth, async (_req, res, next) => {
+  try {
+    const result = await pool.query("SELECT state FROM user_state");
+    const demoBusinessIds = new Set(["BUS001", "BUS002"]);
+    const demoProductIds = new Set(["PRD001", "PRD002"]);
+    const products = [];
+    for (const row of result.rows) {
+      const state = row.state || {};
+      const names = new Map((Array.isArray(state.businesses) ? state.businesses : []).map((b) => [b.business_id, b.business_name]));
+      for (const product of Array.isArray(state.products) ? state.products : []) {
+        const c = product?.customizer;
+        if (!c || !(Array.isArray(c.columns) && c.columns.length) || product.status === "inactive") continue;
+        if (demoBusinessIds.has(product.business_id) || demoProductIds.has(product.product_id)) continue;
+        products.push({
+          product_id: product.product_id,
+          business_id: product.business_id,
+          business_name: names.get(product.business_id) || "",
+          name: product.name,
+          category: product.category || "",
+          sku: product.sku || "",
+          unit: product.unit || "item",
+          selling_price: Number(product.selling_price || 0),
+          customizer: c,
+        });
+      }
+    }
+    res.json({ products });
+  } catch (error) {
+    next(error);
+  }
+});
+
 async function updatePublicBusinessMetric(businessId, field) {
   const rows = await pool.query("SELECT user_id, state FROM user_state");
   for (const row of rows.rows) {

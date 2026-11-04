@@ -1,4 +1,5 @@
 import type { PriceableItem } from "@/lib/steel-calc";
+import type { DxfCutRule, DxfRuleDraft } from "@/lib/types";
 
 export type DxfParsed = { totalLen: number; pierces: number; entities: number };
 
@@ -227,7 +228,13 @@ export type DxfRate = {
   pierceCost: number;
   /** Always normalised to KSh per mm of cut length. */
   cutRate: number;
-  source: "catalog" | "fallback";
+  source: "catalog" | "fallback" | "list";
+  /** Cutting speed in mm/min when the rate came from the pricing list. */
+  cutSpeed?: number | null;
+  /** Row of the pricing list that produced this rate. */
+  rule?: DxfCutRule;
+  /** True when the matched list row has no cut rate filled in yet. */
+  incomplete?: boolean;
   product?: PriceableItem;
   pierceProduct?: PriceableItem;
   note?: string;
@@ -347,4 +354,113 @@ export function dxfLineTotal(cutLenMm: number, pierces: number, rate: DxfRate, q
   const cutCost = cutLenMm * rate.cutRate;
   const pierceCost = pierces * rate.pierceCost;
   return { cutCost, pierceCost, total: (cutCost + pierceCost) * qty };
+}
+
+
+/* ───────────────────────── DXF pricing list (Excel "PricingRules") ───────────────────────── */
+
+/** Starting rows, copied from the PricingRules sheet in pricingup.xlsx. */
+export const DEFAULT_DXF_RULES: DxfRuleDraft[] = [
+  { material: "mild", thickness: 1.2, pierce_cost: 3, cut_rate: 0.04, cut_speed: 10000, description: "compressed air" },
+  { material: "mild", thickness: 1.5, pierce_cost: 3, cut_rate: 0.04, cut_speed: 8000, description: "compressed air" },
+  { material: "mild", thickness: 2, pierce_cost: 4, cut_rate: 0.075, cut_speed: 7000, description: "compressed air" },
+  { material: "mild", thickness: 2.5, pierce_cost: 5, cut_rate: 0.115, cut_speed: 6000, description: "compressed air" },
+  { material: "mild", thickness: 3, pierce_cost: 5, cut_rate: 0.16, cut_speed: 3000, description: "oxygen" },
+  { material: "mild", thickness: 3.8, pierce_cost: 5, cut_rate: 0.16, cut_speed: 2500, description: "oxygen" },
+  { material: "mild", thickness: 6, pierce_cost: 8, cut_rate: 0.33, cut_speed: 2000, description: "oxygen" },
+  { material: "mild", thickness: 10, pierce_cost: 40, cut_rate: 0.45, cut_speed: 1000, description: "oxygen" },
+  { material: "mild", thickness: 12, pierce_cost: 90, cut_rate: 0.66, cut_speed: 800, description: "oxygen" },
+  { material: "mild", thickness: 16, pierce_cost: 90, cut_rate: 0.72, cut_speed: 700, description: "oxygen" },
+  { material: "stainless", thickness: 1.2, pierce_cost: 3, cut_rate: 0.04, cut_speed: 10000, description: "compressed air" },
+  { material: "stainless", thickness: 1.5, pierce_cost: 3, cut_rate: 0.075, cut_speed: 8000, description: "compressed air" },
+  { material: "stainless", thickness: 2, pierce_cost: 4, cut_rate: 0.115, cut_speed: 7000, description: "compressed air" },
+  { material: "stainless", thickness: 2.5, pierce_cost: 5, cut_rate: 0.16, cut_speed: 6000, description: "compressed air" },
+  { material: "stainless", thickness: 2.8, pierce_cost: 5, cut_rate: 0.16, cut_speed: 5000, description: "compressed air" },
+  { material: "stainless", thickness: 3, pierce_cost: 5, cut_rate: 0.33, cut_speed: 4000, description: "compressed air" },
+  { material: "stainless", thickness: 4, pierce_cost: 8, cut_rate: 0.45, cut_speed: 3000, description: "compressed air" },
+  { material: "stainless", thickness: 5, pierce_cost: 40, cut_rate: 0.66, cut_speed: 2000, description: "compressed air" },
+  { material: "stainless", thickness: 6, pierce_cost: 40, cut_rate: 0.72, cut_speed: 1000, description: "compressed air" },
+  { material: "aluminum", thickness: 1, pierce_cost: 3, cut_rate: 0.16, cut_speed: 7000, description: "compressed air" },
+  { material: "aluminum", thickness: 1.35, pierce_cost: 4, cut_rate: 0.16, cut_speed: 6000, description: "compressed air" },
+  { material: "aluminum", thickness: 1.5, pierce_cost: 5, cut_rate: 0.33, cut_speed: 5000, description: "compressed air" },
+  { material: "aluminum", thickness: 2, pierce_cost: 5, cut_rate: 0.45, cut_speed: 3000, description: "compressed air" },
+  { material: "aluminum", thickness: 3, pierce_cost: 5, cut_rate: 0.66, cut_speed: 2000, description: "compressed air" },
+  { material: "aluminum", thickness: 4, pierce_cost: 6, cut_rate: null, cut_speed: 2001, description: "compressed air" },
+  { material: "aluminum", thickness: 6, pierce_cost: 10, cut_rate: 0.72, cut_speed: 1000, description: "compressed air" },
+  { material: "brass", thickness: 1, pierce_cost: 9, cut_rate: 0.16, cut_speed: 7000, description: "compressed air" },
+  { material: "brass", thickness: 1.35, pierce_cost: 16, cut_rate: 0.16, cut_speed: 6000, description: "compressed air" },
+  { material: "brass", thickness: 1.5, pierce_cost: 25, cut_rate: 0.33, cut_speed: 5000, description: "compressed air" },
+  { material: "brass", thickness: 2, pierce_cost: 25, cut_rate: 0.45, cut_speed: 3000, description: "compressed air" },
+  { material: "brass", thickness: 3, pierce_cost: 64, cut_rate: 0.66, cut_speed: 2000, description: "compressed air" },
+  { material: "brass", thickness: 4, pierce_cost: 81, cut_rate: 0.72, cut_speed: 1000, description: "compressed air" },
+];
+
+/**
+ * Reduce a material name to a family key so "Mild Steel", "mild" and "MS" all match
+ * the same rows. Anything not recognised keeps its own lowercase name, so materials
+ * you add yourself (e.g. "titanium") match exactly.
+ */
+export function materialKey(material: string): string {
+  const m = material.trim().toLowerCase();
+  if (/^(mild|ms|carbon)\b|mild steel|carbon steel/.test(m)) return "mild";
+  if (/stainless|^ss\b|^ss\d|inox/.test(m)) return "stainless";
+  if (/alumin/.test(m)) return "aluminum";
+  return m;
+}
+
+export type DxfRuleMatch = {
+  rule: DxfCutRule;
+  /** Tier thickness equals the requested thickness. */
+  exact: boolean;
+  /** Requested thickness is above the thickest tier for this material. */
+  beyondRange: boolean;
+};
+
+/**
+ * Find the pricing-list row for a material + thickness. Rows are thickness tiers:
+ * the smallest tier that is >= the requested thickness is used. If the job is thicker
+ * than every tier, the thickest tier is returned with `beyondRange` set.
+ */
+export function matchDxfRule(
+  rules: DxfCutRule[],
+  material: string,
+  thickness: number,
+): DxfRuleMatch | null {
+  if (!material.trim() || !(thickness > 0)) return null;
+  const key = materialKey(material);
+  const tiers = rules
+    .filter((r) => materialKey(r.material) === key && r.thickness > 0)
+    .sort((a, b) => a.thickness - b.thickness);
+  if (!tiers.length) return null;
+  const hit = tiers.find((t) => t.thickness >= thickness - 1e-9);
+  const rule = hit ?? tiers[tiers.length - 1];
+  return {
+    rule,
+    exact: Math.abs(rule.thickness - thickness) < 1e-9,
+    beyondRange: !hit,
+  };
+}
+
+/** Turn a matched list row into the DxfRate shape used by dxfLineTotal. */
+export function dxfRateFromRule(m: DxfRuleMatch, thickness: number): DxfRate {
+  const { rule } = m;
+  let note = `${rule.material} ${rule.thickness}mm tier`;
+  if (m.beyondRange) note = `${thickness}mm is thicker than the largest ${rule.material} tier (${rule.thickness}mm) — check this price`;
+  else if (!m.exact) note = `${thickness}mm uses the next tier up: ${rule.material} ${rule.thickness}mm`;
+  if (rule.description) note += ` · ${rule.description}`;
+  return {
+    pierceCost: rule.pierce_cost || 0,
+    cutRate: rule.cut_rate ?? 0,
+    cutSpeed: rule.cut_speed,
+    source: "list",
+    rule,
+    incomplete: rule.cut_rate == null,
+    note,
+  };
+}
+
+/** Estimated machine cutting time in minutes (cut length / list cutting speed). */
+export function dxfCutMinutes(cutLenMm: number, cutSpeedMmPerMin?: number | null): number | null {
+  if (!cutSpeedMmPerMin || cutSpeedMmPerMin <= 0 || cutLenMm <= 0) return null;
+  return cutLenMm / cutSpeedMmPerMin;
 }

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Boxes, Download, FileSpreadsheet, FileUp, ImagePlus, Package, Pencil, Share2, Table2, Trash2 } from "lucide-react";
+import { Boxes, Calculator, Download, FileSpreadsheet, FileUp, ImagePlus, Package, Pencil, Share2, Table2, Trash2 } from "lucide-react";
 import { MoreActions } from "@/components/more-actions";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -10,6 +10,8 @@ import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
 import { ListingCover } from "@/components/listing-cover";
 import { ItemListBuilder } from "@/components/item-list-builder";
+import { AdvancedQuotationCalculator } from "@/components/advanced-quotation-calculator";
+import { ProductCustomizerEditDialog, ProductCustomizerEditTrigger } from "@/components/product-customizer-edit-card";
 import { MediaManagerDialog, MediaPicker } from "@/components/media-manager";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,16 +49,26 @@ function itemCoverUrl(p: { image_url?: string; gallery?: { url: string; media_ty
 }
 
 export const Route = createFileRoute("/_app/products")({
-
+  // ?builder=1 opens the spreadsheet product builder (used by "Open Product customizer" in quotations).
+  validateSearch: (search: Record<string, unknown>) => ({
+    builder: search.builder === 1 || search.builder === "1" ? (1 as const) : undefined,
+  }),
   component: ProductsPage,
 });
 
 function ProductsPage() {
-  return <CatalogueItemsPage itemKind="product" />;
+  const { builder } = Route.useSearch();
+  return <CatalogueItemsPage itemKind="product" openBuilderOnLoad={builder === 1} />;
 }
 
 /** Shared catalogue UI for stocked products and offered services. */
-export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "service" }) {
+export function CatalogueItemsPage({
+  itemKind,
+  openBuilderOnLoad = false,
+}: {
+  itemKind: "product" | "service";
+  openBuilderOnLoad?: boolean;
+}) {
   const isService = itemKind === "service";
   const {
 
@@ -78,6 +90,8 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
   const [chooserOpen, setChooserOpen] = useState(false);
   const [open, setOpen] = useState(false);
   const [listOpen, setListOpen] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(openBuilderOnLoad && itemKind === "product");
+  const [customizerEditId, setCustomizerEditId] = useState<string | null>(null);
   const [familyFilter, setFamilyFilter] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [tableCategoryId, setTableCategoryId] = useState("");
@@ -105,10 +119,17 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
   }, [businessSpecDefs, activeCategoryId]);
 
   const tableRows = useMemo(() => {
+    // Show both: items linked to this category table AND items without a category_id
+    // (normal add / spreadsheet builder that only set a free-text category).
     const inCategory = activeCategoryId
-      ? catalogueItems.filter((p) => p.category_id === activeCategoryId)
+      ? catalogueItems.filter((p) => {
+          const cid = (p.category_id || "").trim();
+          return cid === activeCategoryId || cid === "";
+        })
       : catalogueItems;
-    const filtered = familyFilter ? inCategory.filter((p) => (p.family || "") === familyFilter) : inCategory;
+    const filtered = familyFilter
+      ? inCategory.filter((p) => (p.family || "") === familyFilter)
+      : inCategory;
     // Keep each family's rows together (stable sort, so entry order is kept within a family).
     return filtered.slice().sort((a, b) => (a.family || "\uffff").localeCompare(b.family || "\uffff"));
   }, [catalogueItems, activeCategoryId, familyFilter]);
@@ -116,7 +137,9 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
   const categoryFamilies = useMemo(() => {
     const set = new Set<string>();
     for (const p of catalogueItems) {
-      if (p.family && (!activeCategoryId || p.category_id === activeCategoryId)) set.add(p.family);
+      if (!p.family) continue;
+      const cid = (p.category_id || "").trim();
+      if (!activeCategoryId || cid === activeCategoryId || cid === "") set.add(p.family);
     }
     return [...set].sort();
   }, [catalogueItems, activeCategoryId]);
@@ -311,8 +334,8 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
           <div className="border-b border-line px-4 py-3">
             <p className="text-sm font-medium">{categoryLabel}</p>
             <p className="text-xs text-ink-muted">
-              Each row is a product in this table style. Use Variants for multiple sizes under one
-              parent.
+              Rows include items in this category table and items saved without a table category
+              (normal add or spreadsheet builder). Use Variants for multiple sizes under one parent.
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -372,6 +395,9 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                         <td className="px-3 py-2.5 text-ink-muted">{p.family || "-"}</td>
                         <td className="px-3 py-2.5 font-medium">
                           {p.name}
+                          {!(p.category_id || "").trim() ? (
+                            <span className="ml-1 text-[10px] font-normal text-ink-muted">(general)</span>
+                          ) : null}
                           {variantCount > 0 ? (
                             <span className="ml-1 text-xs font-normal text-ink-muted">
                               ({variantCount} var.)
@@ -415,7 +441,8 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                                 toast.success("Product deleted.");
                               }
                             }}
-                          />
+                            onCustomizerEdit={p.customizer?.unlocked?.length ? () => setCustomizerEditId(p.product_id) : undefined}
+                    />
                         </td>
                       </tr>
                     );
@@ -505,6 +532,14 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                         <span className="ml-1 text-sm font-sans font-normal text-ink-muted">/ {p.unit}</span>
                       </p>
                       <p className="text-xs text-ink-muted">{p.stock} in stock</p>
+                      {p.customizer?.unlocked?.length ? (
+                        <div className="mt-2">
+                          <ProductCustomizerEditTrigger
+                            product={p}
+                            onClick={() => setCustomizerEditId(p.product_id)}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                     <ProductMoreMenu
                       isService={isService}
@@ -532,6 +567,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                           toast.success("Product deleted.");
                         }
                       }}
+                      onCustomizerEdit={p.customizer?.unlocked?.length ? () => setCustomizerEditId(p.product_id) : undefined}
                     />
                   </div>
                 </div>
@@ -579,6 +615,24 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                 </span>
               </span>
             </button>
+            {!isService ? (
+              <button
+                type="button"
+                className="flex items-start gap-3 rounded-lg border border-line bg-canvas p-4 text-left transition hover:border-forest/50 hover:bg-paper"
+                onClick={() => {
+                  setChooserOpen(false);
+                  setBuilderOpen(true);
+                }}
+              >
+                <Calculator className="mt-0.5 size-5 shrink-0 text-forest" />
+                <span>
+                  <span className="block font-medium">Spreadsheet product builder</span>
+                  <span className="block text-sm text-ink-muted">
+                    Excel-style costing grid with formulas, lockable sizes, and a card of unlocked fields. Saves into the product catalogue (not a customer quote).
+                  </span>
+                </span>
+              </button>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>
@@ -605,6 +659,56 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                 setTableCategoryId("");
                 setFamilyFilter("");
                 setListOpen(false);
+              }}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={builderOpen} onOpenChange={(v) => !v && setBuilderOpen(false)}>
+        <DialogContent className="w-[min(calc(100%-1rem),56rem)] max-h-[92dvh]">
+          <DialogHeader>
+            <DialogTitle>Spreadsheet product builder</DialogTitle>
+          </DialogHeader>
+          {builderOpen ? (
+            <AdvancedQuotationCalculator
+              products={businessProducts}
+              mode="product_creator"
+              onAddToProduct={(payload) => {
+                const meta = payload.meta as {
+                  sku?: string;
+                  category?: string;
+                  unlocked?: Array<{ key: string; label: string; type: string; unit?: string }>;
+                };
+                const cat = businessCategories.find((c) => c.category_id === activeCategoryId);
+                const rows = (payload.meta as { rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }> }).rows;
+                const primary = rows?.[0];
+                const columns = (payload.meta as { columns?: unknown }).columns as import("@/lib/types").ProductCustomizerColumn[] | undefined;
+                const productId = addProduct({
+                  name: payload.description,
+                  category: meta.category || cat?.name || "Custom",
+                  categoryId: activeCategoryId || undefined,
+                  unit: payload.unit || cat?.unit_default || "item",
+                  sellingPrice: String(payload.selling_price ?? 0),
+                  costPrice: String(payload.cost_price ?? 0),
+                  stock: "0",
+                  sku: meta.sku || "",
+                  description: "Built with spreadsheet product builder",
+                  specs: payload.specs,
+                  itemKind: "product",
+                  customizer: {
+                    calculator: "advanced-spreadsheet",
+                    columns: columns || [],
+                    cells: (primary?.cells || {}) as Record<string, string | number | null>,
+                    formulas: primary?.formulas,
+                    unlocked: meta.unlocked || [],
+                    total: payload.cost_price,
+                  },
+                });
+                if (productId) {
+                  toast.success(`“${payload.description}” saved to catalogue.`);
+                  setBuilderOpen(false);
+                }
               }}
             />
           ) : null}
@@ -730,6 +834,20 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
         </DialogContent>
       </Dialog>
 
+
+      {customizerEditId && businessProducts.some((x) => x.product_id === customizerEditId) ? (
+        <ProductCustomizerEditDialog
+          product={businessProducts.find((x) => x.product_id === customizerEditId)!}
+          open
+          onOpenChange={(v) => {
+            if (!v) setCustomizerEditId(null);
+          }}
+          onSave={(patch) => {
+            updateProduct(customizerEditId, patch);
+          }}
+        />
+      ) : null}
+
       <MediaManagerDialog
         open={Boolean(mediaFor)}
         onClose={() => setMediaForId(null)}
@@ -758,11 +876,13 @@ function ProductMoreMenu({
   onEdit,
   onImages,
   onDelete,
+  onCustomizerEdit,
 }: {
   isService?: boolean;
   onEdit: () => void;
   onImages: () => void;
   onDelete: () => void;
+  onCustomizerEdit?: () => void;
 }) {
   const noun = isService ? "service" : "product";
   return (
@@ -770,6 +890,9 @@ function ProductMoreMenu({
       label={`More ${noun} actions`}
       actions={[
         { label: `Edit ${noun}`, icon: <Pencil className="size-3.5" />, onSelect: onEdit },
+        ...(onCustomizerEdit
+          ? [{ label: "Edit custom fields", icon: <Calculator className="size-3.5" />, onSelect: onCustomizerEdit }]
+          : []),
         { label: "Manage images", icon: <ImagePlus className="size-3.5" />, onSelect: onImages },
         { label: `Delete ${noun}`, icon: <Trash2 className="size-3.5" />, destructive: true, onSelect: onDelete },
       ]}
