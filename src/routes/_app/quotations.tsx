@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { Plus,
   CheckCircle2,
   Download,
@@ -18,6 +18,8 @@ import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
 import { downloadQuoteHtml, printQuotePdf } from "@/lib/quote-export";
 import { MoreActions } from "@/components/more-actions";
+import { CustomQuotationCalculator } from "@/components/quotation-calculator";
+import { AdvancedQuotationCalculator } from "@/components/advanced-quotation-calculator";
 import { CustomizerQuoteBuilder } from "@/components/customizer-quote-builder";
 import { Toolbar } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
@@ -34,20 +36,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { DxfPricingList } from "@/components/dxf-pricing-list";
-import {
-  dxfCutMinutes,
-  dxfLineTotal,
-  dxfRateFromRule,
-  DXF_MATERIALS,
-  DXF_PROCESSES,
-  matchDxfRate,
-  matchDxfRule,
-  parseDXF,
-  type DxfRate,
-} from "@/lib/dxf-calc";
+import { dxfLineTotal, DXF_MATERIALS, DXF_PROCESSES, matchDxfRate, parseDXF } from "@/lib/dxf-calc";
 import { formatDate, money, uid } from "@/lib/format";
-import type { DxfCutRule } from "@/lib/types";
 import {
   catalogMassKgPerM,
   chargedMaterialKg,
@@ -87,6 +77,17 @@ const QUOTE_TYPES: { value: QuoteType; label: string; blurb: string }[] = [
     value: "custom_product",
     label: "Materials & Products",
     blurb: "Search products across lifeBoostSME — steel, agriculture, construction & more",
+  },
+  {
+    value: "custom_calculator",
+    label: "Excel Calculator",
+    blurb: "Build a calculation table with editable quantities, rates and formulas",
+  },
+  {
+    value: "product_customizer",
+    label: "Product customizer",
+    blurb:
+      "Excel-style product builder: columns, formulas, lockable sizes — saves to your product catalogue (not a customer quote)",
   },
   {
     value: "customizer_quote",
@@ -347,8 +348,7 @@ function QuotationsPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   {q.quote_type && q.quote_type !== "general" ? (
                     <Badge tone="neutral">
-                      {QUOTE_TYPES.find((t) => t.value === q.quote_type)?.label ??
-                        (q.quote_type === "custom_calculator" ? "Excel Calculator" : q.quote_type)}
+                      {QUOTE_TYPES.find((t) => t.value === q.quote_type)?.label ?? q.quote_type}
                     </Badge>
                   ) : null}
                   <p className="font-medium tabular-nums">{money(q.total)}</p>
@@ -770,13 +770,7 @@ function QuoteWizard({
   onSubmit: (form: WizardForm) => void;
   initial?: WizardForm;
 }) {
-  const { publicMarketplace, selectedBusiness, businessProducts, businessServices, currentUser } = useLife();
-  const navigate = useNavigate();
-  /** The customizer lives under Products → Add product, not in quotations. */
-  const openProductCustomizer = () => {
-    if (lineItems.length && !window.confirm("Leave this quotation? The lines you added will be lost.")) return;
-    void navigate({ to: "/products", search: { builder: 1 } });
-  };
+  const { publicMarketplace, selectedBusiness, businessProducts, businessServices, currentUser, addProduct } = useLife();
   const [quoteType, setQuoteType] = useState<QuoteType | null>(initial?.quoteType ?? null);
   const [customerId, setCustomerId] = useState(initial?.customerId ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
@@ -909,6 +903,70 @@ function QuoteWizard({
     );
   }
 
+  // Product customizer: catalogue product builder (not a customer quotation)
+  if (quoteType === "product_customizer") {
+    return (
+      <div>
+        <button
+          type="button"
+          className="mb-3 text-xs text-ink-muted hover:text-ink"
+          onClick={() => {
+            setQuoteType(null);
+            setLineItems([]);
+            setSelectedMaterialId("");
+          }}
+        >
+          ← Change quote type
+        </button>
+        <p className="mb-3 text-sm text-ink-muted">
+          Build a costed product and save it to your catalogue. This does not create or send a
+          customer quotation.
+        </p>
+        <AdvancedQuotationCalculator
+          products={catalog}
+          mode="product_creator"
+          onAddToProduct={(payload) => {
+            const meta = (payload.meta || {}) as {
+              sku?: string;
+              category?: string;
+            };
+            const rows = (payload.meta as { rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }> }).rows;
+            const primary = rows?.[0];
+            const columns = (payload.meta as { columns?: import("@/lib/types").ProductCustomizerColumn[] }).columns;
+            const productId = addProduct({
+              name: payload.description,
+              category: meta.category || "Custom",
+              unit: payload.unit || "item",
+              sellingPrice: String(payload.selling_price ?? 0),
+              costPrice: String(payload.cost_price ?? 0),
+              stock: "0",
+              sku: meta.sku || "",
+              description: "Built with product customizer",
+              specs: payload.specs,
+              itemKind: "product",
+              customizer: {
+                calculator: "advanced-spreadsheet",
+                columns: columns || [],
+                cells: (primary?.cells || {}) as Record<string, string | number | null>,
+                formulas: primary?.formulas,
+                unlocked: (payload.meta as { unlocked?: Array<{ key: string; label: string; type: string; unit?: string }> }).unlocked || [],
+                total: payload.cost_price,
+              },
+            });
+            if (productId) {
+              // toast is shown by the builder; close wizard via cancel if parent provides it
+            }
+          }}
+        />
+        <div className="mt-4 flex justify-end">
+          <Button type="button" variant="ghost" onClick={onCancel}>
+            Close
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <button
@@ -958,16 +1016,13 @@ function QuoteWizard({
         </Field>
       ) : (
         <>
-          {quoteType === "customizer_quote" ? (
-            <CustomizerQuoteBuilder
-              products={businessProducts || []}
-              ownBusinessName={selectedBusiness?.business_name}
-              onAdd={addLineItem}
-              onOpenCustomizer={openProductCustomizer}
-            />
+          {quoteType === "custom_calculator" ? (
+            <CustomQuotationCalculator onAdd={addLineItem} />
+          ) : quoteType === "customizer_quote" ? (
+            <CustomizerQuoteBuilder products={businessProducts || []} onAdd={addLineItem} />
           ) : (
           <>
-          {quoteType !== "dxf_cut" && catalogBusinesses.length > 1 && (
+          {catalogBusinesses.length > 1 && (
             <Field label="Search catalog" hint="optional — narrow suggestions to one business">
               <Select value={businessFilter} onChange={(e) => setBusinessFilter(e.target.value)}>
                 <option value="">All businesses (recommended)</option>
@@ -1030,7 +1085,7 @@ function QuoteWizard({
               />
             </>
           )}
-          {quoteType === "dxf_cut" && <DxfBuilder onAdd={addLineItem} />}
+          {quoteType === "dxf_cut" && <DxfBuilder products={catalog} onAdd={addLineItem} />}
           {quoteType === "custom_product" && (
             <>
               <MaterialsBuilder products={catalog} onAdd={addLineItem} />
@@ -1038,12 +1093,7 @@ function QuoteWizard({
                 <p className="mb-2 text-xs font-medium text-ink-muted">
                   Or reuse a spreadsheet customizer product with different inputs
                 </p>
-                <CustomizerQuoteBuilder
-              products={businessProducts || []}
-              ownBusinessName={selectedBusiness?.business_name}
-              onAdd={addLineItem}
-              onOpenCustomizer={openProductCustomizer}
-            />
+                <CustomizerQuoteBuilder products={businessProducts || []} onAdd={addLineItem} />
               </div>
             </>
           )}
@@ -1051,7 +1101,7 @@ function QuoteWizard({
           )}
 
           <LineItemsList items={lineItems} onRemove={removeLineItem} />
-          <ExtraChargeBuilder onAdd={addLineItem} />
+          {quoteType !== "custom_calculator" ? <ExtraChargeBuilder onAdd={addLineItem} /> : null}
         </>
       )}
 
@@ -3025,7 +3075,13 @@ function FabricationCostBuilder({
   );
 }
 
-function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
+function DxfBuilder({
+  products,
+  onAdd,
+}: {
+  products: MarketplaceProduct[];
+  onAdd: (li: QuoteLineItem) => void;
+}) {
   const [process, setProcess] = useState<string>("Laser Cut");
   const [customProcess, setCustomProcess] = useState(false);
   const [processCustom, setProcessCustom] = useState("");
@@ -3037,13 +3093,29 @@ function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
   const [cutLenMm, setCutLenMm] = useState(0);
   const [pierces, setPierces] = useState(0);
   const [qty, setQty] = useState("1");
-  /** Manual rate overrides (excel-style pricing). Empty = use the pricing list. */
+  /** Manual rate overrides (excel-style pricing). Empty = use matched catalogue/fallback. */
   const [pierceOverride, setPierceOverride] = useState("");
   const [cutRateOverride, setCutRateOverride] = useState("");
   const [showPriceList, setShowPriceList] = useState(false);
-  /** Saved per business (synced with the account) — same columns as the PricingRules Excel sheet. */
-  const { businessDxfRules, addDxfRule, updateDxfRule, deleteDxfRule, replaceDxfRules } = useLife();
-  const dxfRules: DxfCutRule[] = businessDxfRules || [];
+  /** Local excel-style price rows the user can maintain for this quote session. */
+  type PriceRow = {
+    id: string;
+    process: string;
+    material: string;
+    thickness: string;
+    pierce: string;
+    cutPerM: string;
+  };
+  const [priceRows, setPriceRows] = useState<PriceRow[]>([
+    {
+      id: "pr-1",
+      process: "Laser Cut",
+      material: "Mild Steel",
+      thickness: "3",
+      pierce: "25",
+      cutPerM: "800",
+    },
+  ]);
 
   const processValue = customProcess ? processCustom.trim() : process;
   const materialValue = customMaterial ? materialCustom.trim() : material;
@@ -3060,15 +3132,40 @@ function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
     );
   }
 
-  // Priority: per-job overrides → saved pricing list (Excel rules) → typical rates
-  const ruleMatch = matchDxfRule(dxfRules, materialValue, thicknessNum);
-  const listMatch: DxfRate | null = ruleMatch ? dxfRateFromRule(ruleMatch, thicknessNum) : null;
+  // Prefer explicit overrides → local excel price list match → catalogue/fallback
+  const listMatch = (() => {
+    if (!materialValue || !thicknessNum) return null;
+    const mat = materialValue.toLowerCase();
+    const proc = (processValue || "").toLowerCase();
+    const th = String(thicknessNum);
+    const row = priceRows.find((r) => {
+      const rm = r.material.trim().toLowerCase();
+      const rp = r.process.trim().toLowerCase();
+      const rt = String(Number(r.thickness) || r.thickness).trim();
+      if (!rm || !rt) return false;
+      const matOk = rm === mat || mat.includes(rm) || rm.includes(mat);
+      const thOk = rt === th || Math.abs(Number(rt) - thicknessNum) < 1e-6;
+      const procOk = !rp || !proc || rp === proc || proc.includes(rp) || rp.includes(proc);
+      return matOk && thOk && procOk;
+    });
+    if (!row) return null;
+    const pierceCost = Number(row.pierce) || 0;
+    // cutPerM is KSh per metre → convert to per mm for dxfLineTotal
+    const cutPerM = Number(row.cutPerM) || 0;
+    return {
+      pierceCost,
+      cutRate: cutPerM / 1000,
+      source: "list" as const,
+      note: "from excel pricing list",
+    };
+  })();
 
-  // No catalogue lookup: materials missing from the list use built-in typical rates (empty product pool).
-  const typicalRate =
-    materialValue && thicknessNum > 0 ? matchDxfRate([], materialValue, thicknessNum, processValue) : null;
+  const catalogRate =
+    materialValue && thicknessNum > 0
+      ? matchDxfRate(products, materialValue, thicknessNum, processValue)
+      : null;
 
-  const baseRate = listMatch || typicalRate;
+  const baseRate = listMatch || catalogRate;
 
   const rate =
     baseRate && (pierceOverride.trim() !== "" || cutRateOverride.trim() !== "")
@@ -3084,8 +3181,7 @@ function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
               ? (Number(cutRateOverride) || 0) / 1000
               : baseRate.cutRate,
           source: "list" as const,
-          incomplete: cutRateOverride.trim() !== "" ? false : baseRate.incomplete,
-          note: "manual override on top of the pricing list",
+          note: "manual / excel pricing",
         }
       : baseRate;
 
@@ -3093,20 +3189,17 @@ function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
     rate && cutLenMm > 0
       ? dxfLineTotal(cutLenMm, pierces, rate, Number(qty || 1))
       : null;
+  const matchedBusiness =
+    rate && "product" in rate && rate.product
+      ? products.find((p) => p.product_id === rate.product?.product_id)
+      : undefined;
+
   function add() {
     if (!processValue) return toast.error("Choose a process (Laser Cut, Engraving, …).");
     if (!materialValue) return toast.error("Choose material.");
     if (!thicknessNum) return toast.error("Choose thickness.");
     if (!cutLenMm) return toast.error("Upload a DXF or enter cut length.");
     if (!rate || !costs) return toast.error("Could not compute cost.");
-    if (ruleMatch?.beyondRange && rate.source === "list" && cutRateOverride.trim() === "")
-      return toast.error(
-        `${thicknessNum}mm is thicker than the largest ${ruleMatch.rule.material} tier (${ruleMatch.rule.thickness}mm). Add a row for it under Customize pricing, or type an override.`,
-      );
-    if (rate.incomplete)
-      return toast.error(
-        `The pricing list has no cut rate for ${rate.rule?.material} ${rate.rule?.thickness}mm. Fill it in under Customize pricing, or type an override.`,
-      );
 
     onAdd({
       line_id: uid("LI"),
@@ -3115,6 +3208,9 @@ function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
       unit: "job",
       rate: costs.total / Number(qty || 1),
       amount: costs.total,
+      source_product_id: rate.product?.product_id,
+      source_business_id: matchedBusiness?.business_id,
+      source_business_name: matchedBusiness?.business_name,
       meta: {
         process: processValue,
         material: materialValue,
@@ -3136,10 +3232,11 @@ function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
       <p className="mb-2 text-sm font-medium">DXF / CNC / engraver / punch pricing</p>
       <p className="mb-3 text-xs text-ink-muted">
         Choose process and material (lists or Customize). Type any{" "}
-        <span className="font-medium text-ink">thickness</span> in mm. Prices come from your{" "}
-        <span className="font-medium text-ink">pricing list</span> (pierce + cut rate per thickness
-        tier) — open <span className="font-medium text-ink">Customize pricing</span> to edit, add rows
-        or import / export Excel. Materials that are not in the list use built-in typical rates.
+        <span className="font-medium text-ink">thickness</span> in mm. Use{" "}
+        <span className="font-medium text-ink">Customize pricing</span> for an excel-style rate list
+        (pierce + KSh/m). Catalogue products named like{" "}
+        <span className="font-medium text-ink">&quot;Laser Cut Mild Steel 3mm&quot;</span> still
+        match when no list row applies.
       </p>
 
       <div className="mb-3 grid gap-3 sm:grid-cols-3">
@@ -3224,13 +3321,10 @@ function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
       <div className="mb-3 rounded-lg border border-ink/10 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-sm font-medium">
-              Pricing list{" "}
-              <span className="font-normal text-ink-muted">({dxfRules.length} rows, saved to your account)</span>
-            </p>
+            <p className="text-sm font-medium">Excel pricing list</p>
             <p className="text-xs text-ink-muted">
-              Each row is a thickness tier: a job uses the smallest tier at or above its thickness.
-              Pierce is KSh per start, cut rate is KSh per mm of path.
+              Customize pierce (KSh each) and cut rate (KSh per metre). Rows matching process ·
+              material · thickness are used before catalogue defaults.
             </p>
           </div>
           <Button
@@ -3244,15 +3338,132 @@ function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
         </div>
 
         {showPriceList ? (
-          <div className="space-y-3">
-            <DxfPricingList
-              rules={dxfRules}
-              activeRuleId={ruleMatch?.rule.rule_id}
-              onAdd={addDxfRule}
-              onUpdate={updateDxfRule}
-              onDelete={deleteDxfRule}
-              onReplace={replaceDxfRules}
-            />
+          <div className="space-y-2">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] border-collapse text-sm">
+                <thead>
+                  <tr className="bg-canvas text-left text-xs text-ink-muted">
+                    <th className="p-1.5">Process</th>
+                    <th className="p-1.5">Material</th>
+                    <th className="p-1.5">Thickness (mm)</th>
+                    <th className="p-1.5">Pierce (KSh)</th>
+                    <th className="p-1.5">Cut (KSh/m)</th>
+                    <th className="p-1.5 w-10" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {priceRows.map((row) => (
+                    <tr key={row.id} className="border-t border-ink/5">
+                      <td className="p-1">
+                        <Input
+                          className="h-8"
+                          value={row.process}
+                          onChange={(e) =>
+                            setPriceRows((rows) =>
+                              rows.map((r) =>
+                                r.id === row.id ? { ...r, process: e.target.value } : r,
+                              ),
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="p-1">
+                        <Input
+                          className="h-8"
+                          value={row.material}
+                          onChange={(e) =>
+                            setPriceRows((rows) =>
+                              rows.map((r) =>
+                                r.id === row.id ? { ...r, material: e.target.value } : r,
+                              ),
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="p-1">
+                        <Input
+                          className="h-8 w-24"
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={row.thickness}
+                          onChange={(e) =>
+                            setPriceRows((rows) =>
+                              rows.map((r) =>
+                                r.id === row.id ? { ...r, thickness: e.target.value } : r,
+                              ),
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="p-1">
+                        <Input
+                          className="h-8 w-28"
+                          type="number"
+                          min={0}
+                          value={row.pierce}
+                          onChange={(e) =>
+                            setPriceRows((rows) =>
+                              rows.map((r) =>
+                                r.id === row.id ? { ...r, pierce: e.target.value } : r,
+                              ),
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="p-1">
+                        <Input
+                          className="h-8 w-28"
+                          type="number"
+                          min={0}
+                          value={row.cutPerM}
+                          onChange={(e) =>
+                            setPriceRows((rows) =>
+                              rows.map((r) =>
+                                r.id === row.id ? { ...r, cutPerM: e.target.value } : r,
+                              ),
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="p-1">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() =>
+                            setPriceRows((rows) => rows.filter((r) => r.id !== row.id))
+                          }
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setPriceRows((rows) => [
+                  ...rows,
+                  {
+                    id: uid("PR"),
+                    process: processValue || "Laser Cut",
+                    material: materialValue || "",
+                    thickness: thickness || "",
+                    pierce: "25",
+                    cutPerM: "800",
+                  },
+                ])
+              }
+            >
+              <Plus className="mr-1 size-3.5" /> Add price row
+            </Button>
             <div className="grid gap-2 sm:grid-cols-2">
               <Field label="Override pierce (KSh) for this job" className="mb-0" hint="optional">
                 <Input
@@ -3260,7 +3471,7 @@ function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
                   min={0}
                   value={pierceOverride}
                   onChange={(e) => setPierceOverride(e.target.value)}
-                  placeholder="leave blank to use the list"
+                  placeholder="leave blank to use list/catalogue"
                 />
               </Field>
               <Field label="Override cut rate (KSh/m) for this job" className="mb-0" hint="optional">
@@ -3269,7 +3480,7 @@ function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
                   min={0}
                   value={cutRateOverride}
                   onChange={(e) => setCutRateOverride(e.target.value)}
-                  placeholder="leave blank to use the list"
+                  placeholder="leave blank to use list/catalogue"
                 />
               </Field>
             </div>
@@ -3320,26 +3531,27 @@ function DxfBuilder({ onAdd }: { onAdd: (li: QuoteLineItem) => void }) {
 
       {rate && costs && (
         <p className="mb-3 text-xs text-ink-muted">
-          {rate.source === "list" ? (
+          {rate.source === "catalog" ? (
+            <>
+              using <span className="font-medium text-ink">{rate.product?.name}</span>
+              {matchedBusiness ? ` from ${matchedBusiness.business_name}` : ""}
+              {rate.note ? ` (${rate.note})` : ""}
+            </>
+          ) : rate.source === "list" || rate.note?.includes("excel") || rate.note?.includes("manual") ? (
             <span>
-              {rate.incomplete ? (
-                <span className="text-red-600">pricing list row has no cut rate — {rate.note}</span>
-              ) : (
-                <>pricing list: {rate.note}</>
-              )}
+              using excel / custom pricing
+              {rate.note ? ` ({rate.note})` : ""} for {processValue} · {materialValue} ·{" "}
+              {thicknessNum}mm
             </span>
           ) : (
             <span>
-              {materialValue} is not in your pricing list — using typical rates. Add a row for it under
-              Customize pricing.
+              no company matched for {processValue} · {materialValue} · {thicknessNum}mm — using
+              typical rates. List products as &quot;{processValue} {materialValue} {thicknessNum}
+              mm&quot; (unit: m), or set rates under Customize pricing.
             </span>
           )}
           {" · "}pierce {money(costs.pierceCost)} + path {money(costs.cutCost)} ={" "}
           <span className="font-medium text-ink">{money(costs.total)}</span>
-          {(() => {
-            const mins = dxfCutMinutes(cutLenMm, rate.cutSpeed);
-            return mins != null ? ` · ≈ ${mins < 1 ? "<1" : mins.toFixed(1)} min cutting per part` : "";
-          })()}
         </p>
       )}
 
