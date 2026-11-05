@@ -1,3 +1,4 @@
+import { interleaveByOwner } from "@/lib/marketplace-mix";
 import {
   createContext,
   useContext,
@@ -151,12 +152,13 @@ export function LifeProvider({ children }: { children: ReactNode }) {
       });
       if (!response.ok) return false;
       const payload = await response.json();
+      // Alternate owners so one user's/company's items are not shown all together.
       const next = {
-        businesses: (Array.isArray(payload.businesses) ? payload.businesses : []).filter(hasMarketplaceCover),
-        professionals: (Array.isArray(payload.professionals) ? payload.professionals : []).filter(hasMarketplaceCover),
-        assets: (Array.isArray(payload.assets) ? payload.assets : []).filter(hasMarketplaceCover),
+        businesses: interleaveByOwner((Array.isArray(payload.businesses) ? payload.businesses : []).filter(hasMarketplaceCover)),
+        professionals: interleaveByOwner((Array.isArray(payload.professionals) ? payload.professionals : []).filter(hasMarketplaceCover)),
+        assets: interleaveByOwner((Array.isArray(payload.assets) ? payload.assets : []).filter(hasMarketplaceCover)),
         products: Array.isArray(payload.products) ? payload.products : [],
-        listings: (Array.isArray(payload.listings) ? payload.listings : []).filter(hasMarketplaceCover),
+        listings: interleaveByOwner((Array.isArray(payload.listings) ? payload.listings : []).filter(hasMarketplaceCover)),
       };
       // Keep the same object when nothing changed so the marketplace does not re-render for no reason.
       setPublicMarketplace((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));

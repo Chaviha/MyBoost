@@ -689,6 +689,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
       const listedBusinesses = allBusinesses.filter((b) => b?.listed && hasCoverImage(b) && !demoBusinessIds.has(b.business_id) && !demoBusinessNames.has(b.business_name));
       for (const business of listedBusinesses) {
         businesses.push({
+          owner_id: String(row.user_id),
           business_id: business.business_id,
           business_name: business.business_name,
           business_type: business.business_type,
@@ -707,6 +708,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
       for (const employee of Array.isArray(state.employees) ? state.employees : []) {
         if (employee?.listed && hasCoverImage(employee) && businessMap.has(employee.business_id)) {
           professionals.push({
+            owner_id: String(row.user_id),
             employee_id: employee.employee_id,
             name: employee.name,
             role: employee.role,
@@ -724,6 +726,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
       for (const asset of Array.isArray(state.assets) ? state.assets : []) {
         if (asset?.listed && hasCoverImage(asset)) {
           assets.push({
+            owner_id: String(row.user_id),
             asset_id: asset.asset_id,
             name: asset.name,
             type: asset.type,
@@ -746,6 +749,7 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
         const owner = listedById.get(product?.business_id);
         if (!owner || product.status === "inactive" || demoProductIds.has(product.product_id) || !hasCoverImage(product)) continue;
         listings.push({
+          owner_id: String(row.user_id),
           product_id: product.product_id,
           business_id: product.business_id,
           business_name: owner.business_name,
