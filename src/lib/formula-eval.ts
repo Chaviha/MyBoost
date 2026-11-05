@@ -3,8 +3,9 @@
  *
  * Supports:
  *   + - * / ( )
- *   SIN, COS, TAN  (radians, Excel-compatible)
- *   SINDEG, COSDEG, TANDEG  (degrees)
+ *   SIN, COS, TAN  (degrees — LifeBoost default for shop angles)
+ *   SINDEG, COSDEG, TANDEG  (same as SIN/COS/TAN, degrees)
+ *   SINRAD, COSRAD, TANRAD  (radians, Excel-style)
  *   ABS, SQRT, MIN, MAX, ROUND, FLOOR, CEIL, PI()
  *   IF(condition, then, else)
  *   Comparisons in IF: < > <= >= = == <> !=
@@ -216,26 +217,31 @@ export function evaluateFormula(expression: string): number {
   }
 
   function callFn(name: string, args: number[]): number {
-    const deg = (r: number) => (r * Math.PI) / 180;
+    const toRad = (degrees: number) => (degrees * Math.PI) / 180;
     switch (name) {
+      // Degrees (default) — SIN(30) = 0.5
       case "SIN":
-        if (args.length !== 1) throw new Error("SIN needs 1 argument (radians).");
-        return Math.sin(args[0]);
-      case "COS":
-        if (args.length !== 1) throw new Error("COS needs 1 argument (radians).");
-        return Math.cos(args[0]);
-      case "TAN":
-        if (args.length !== 1) throw new Error("TAN needs 1 argument (radians).");
-        return Math.tan(args[0]);
       case "SINDEG":
-        if (args.length !== 1) throw new Error("SINDEG needs 1 argument (degrees).");
-        return Math.sin(deg(args[0]));
+        if (args.length !== 1) throw new Error("SIN needs 1 argument (degrees).");
+        return Math.sin(toRad(args[0]));
+      case "COS":
       case "COSDEG":
-        if (args.length !== 1) throw new Error("COSDEG needs 1 argument (degrees).");
-        return Math.cos(deg(args[0]));
+        if (args.length !== 1) throw new Error("COS needs 1 argument (degrees).");
+        return Math.cos(toRad(args[0]));
+      case "TAN":
       case "TANDEG":
-        if (args.length !== 1) throw new Error("TANDEG needs 1 argument (degrees).");
-        return Math.tan(deg(args[0]));
+        if (args.length !== 1) throw new Error("TAN needs 1 argument (degrees).");
+        return Math.tan(toRad(args[0]));
+      // Radians (Excel-style) — SINRAD(PI()/6) ≈ 0.5
+      case "SINRAD":
+        if (args.length !== 1) throw new Error("SINRAD needs 1 argument (radians).");
+        return Math.sin(args[0]);
+      case "COSRAD":
+        if (args.length !== 1) throw new Error("COSRAD needs 1 argument (radians).");
+        return Math.cos(args[0]);
+      case "TANRAD":
+        if (args.length !== 1) throw new Error("TANRAD needs 1 argument (radians).");
+        return Math.tan(args[0]);
       case "ABS":
         if (args.length !== 1) throw new Error("ABS needs 1 argument.");
         return Math.abs(args[0]);

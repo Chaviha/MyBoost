@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
 import { MoreActions } from "@/components/more-actions";
 import { Toolbar } from "@/components/app-shell";
+import { SearchFilter } from "@/components/search-filter";
 import { CatalogueSubnav } from "@/components/catalogue-subnav";
 import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
@@ -43,6 +44,7 @@ function CategoriesPage() {
     applyCatalogueTemplate,
   } = useLife();
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (!can("view_products")) {
     return <AccessDenied need="Product catalogues are for business owners." />;
@@ -61,6 +63,8 @@ function CategoriesPage() {
       />
       <CatalogueSubnav />
 
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search categories…" />
+
       {businessCategories.length === 0 ? (
         <EmptyState
           icon={Tags}
@@ -68,7 +72,13 @@ function CategoriesPage() {
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
-          {businessCategories.map(
+          {businessCategories
+            .filter((c) => {
+              const q = searchQuery.trim().toLowerCase();
+              if (!q) return true;
+              return `${c.name} ${c.unit_default ?? ""}`.toLowerCase().includes(q);
+            })
+            .map(
             (c) => {
               const specs = businessSpecDefs
                 .filter((s) => s.category_id === c.category_id)

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { JobCard } from "@/components/job-card";
 import { PageHeader } from "@/components/page-header";
+import { SearchFilter } from "@/components/search-filter";
 import { SendRequestDialog } from "@/components/request-dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,12 +25,20 @@ function WorkPage() {
   const jobsData = useWorkData(workApi.jobs, NO_JOBS);
   const targets = useWorkData(workApi.targets, NO_TARGETS);
   const [sendFor, setSendFor] = useState<WorkJob | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [busyJob, setBusyJob] = useState<string | null>(null);
 
   const myJobs = jobsData.data.filter((j) => j.role === "employee");
   const upcoming = [...myJobs].sort((a, b) => +new Date(a.due_date) - +new Date(b.due_date));
   const deadlines = upcoming.filter((j) => j.status !== "Completed");
   const now = Date.now();
+  const matchesSearch = (job: WorkJob) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return `${job.title} ${job.description ?? ""} ${job.status} ${job.business_name ?? ""}`.toLowerCase().includes(q);
+  };
+  const filteredUpcoming = upcoming.filter(matchesSearch);
+  const filteredDeadlines = deadlines.filter(matchesSearch);
   const isOverdue = (j: WorkJob) => j.status !== "Completed" && +new Date(j.due_date) < now;
 
   async function setStatus(job: WorkJob, status: JobStatus) {
@@ -96,6 +105,7 @@ function WorkPage() {
         title="My jobs"
         subtitle="Jobs the business owner assigned to you, with their live status. Send progress photos and notes to the owner."
       />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search jobs…" />
       {jobsData.loading ? (
         <p className="text-sm text-ink-muted">Loading your jobs…</p>
       ) : jobsData.error ? (
@@ -110,13 +120,13 @@ function WorkPage() {
             <TabsTrigger value="progress">Progress</TabsTrigger>
           </TabsList>
           <TabsContent value="jobs">
-            <div className="flex flex-col gap-3">{upcoming.map((job) => card(job))}</div>
+            <div className="flex flex-col gap-3">{filteredUpcoming.map((job) => card(job))}</div>
           </TabsContent>
           <TabsContent value="deadlines">
             {deadlines.length === 0 ? (
               <EmptyState icon={CalendarClock} text="No open deadlines." compact />
             ) : (
-              <div className="flex flex-col gap-3">{deadlines.map((job) => card(job, true))}</div>
+              <div className="flex flex-col gap-3">{filteredDeadlines.map((job) => card(job, true))}</div>
             )}
           </TabsContent>
           <TabsContent value="progress">
@@ -124,7 +134,7 @@ function WorkPage() {
               <EmptyState icon={ListChecks} text="No progress to show." compact />
             ) : (
               <div className="flex flex-col gap-3">
-                {upcoming.map((job) => (
+                {filteredUpcoming.map((job) => (
                   <JobCard
                     key={job.job_id}
                     job={{ ...job, employee_id: "", customer_id: "" }}

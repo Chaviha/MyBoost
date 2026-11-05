@@ -58,7 +58,16 @@ type Props = {
  */
 export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
   const customizerProducts = useMemo(
-    () => products.filter((p) => p.customizer?.unlocked?.length || p.customizer?.columns?.length),
+    () =>
+      products.filter((p) => {
+        if (p.customizer?.columns?.length) return true;
+        if (p.customizer?.unlocked?.length) return true;
+        if (p.customizer?.calculator === "advanced-spreadsheet") return true;
+        // Products saved from the spreadsheet builder
+        if ((p.description || "").toLowerCase().includes("spreadsheet product builder")) return true;
+        if ((p.description || "").toLowerCase().includes("product customizer")) return true;
+        return false;
+      }),
     [products],
   );
 
@@ -70,16 +79,37 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
   const [qty, setQty] = useState("1");
   const [linesAdded, setLinesAdded] = useState(0);
 
+  const [categoryFilter, setCategoryFilter] = useState("");
+
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of customizerProducts) {
+      if (p.category) set.add(p.category);
+    }
+    return [...set].sort();
+  }, [customizerProducts]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return customizerProducts;
-    return customizerProducts.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        (p.category && p.category.toLowerCase().includes(q)) ||
-        (p.sku && p.sku.toLowerCase().includes(q)),
-    );
-  }, [customizerProducts, query]);
+    return customizerProducts.filter((p) => {
+      if (categoryFilter && (p.category || "") !== categoryFilter) return false;
+      if (!q) return true;
+      const hay = [
+        p.name,
+        p.category,
+        p.sku,
+        p.description,
+        p.family,
+        p.unit,
+        ...(p.customizer?.columns || []).map((c) => c.label),
+        ...(p.customizer?.unlocked || []).map((u) => u.label),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [customizerProducts, query, categoryFilter]);
 
   function pickProduct(p: Product) {
     setSelectedId(p.product_id);
@@ -88,7 +118,13 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
   }
 
   const config = selected?.customizer;
-  const unlocked = config?.unlocked || [];
+  // Quoters only: never include sizeLocked columns even if mis-listed in unlocked
+  const unlocked = (config?.unlocked || []).filter((u) => {
+    const col = config?.columns?.find((c) => c.key === u.key);
+    if (col?.type === "size" && col.sizeLocked) return false;
+    if (col && col.editableByQuoter === false) return false;
+    return true;
+  });
 
   const computed = useMemo(() => {
     if (!config) return { cells, total: 0, error: undefined as string | undefined };
@@ -180,19 +216,40 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
         </div>
       </div>
 
-      <Field label="Search customizer products">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
-          <Input
-            className="pl-9"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Name, category, SKU…"
-          />
-        </div>
-      </Field>
+      <div className="grid gap-2 sm:grid-cols-[1fr_10rem]">
+        <Field label="Catalogue search" hint="Products built with the product customizer">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
+            <Input
+              className="pl-9"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name, category, SKU, description…"
+            />
+          </div>
+        </Field>
+        <Field label="Category">
+          <select
+            className="flex h-10 w-full rounded-md border border-ink/15 bg-paper px-3 text-sm"
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+          >
+            <option value="">All categories</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
 
-      <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-ink/10">
+      <p className="text-xs text-ink-muted">
+        {filtered.length} customizer product{filtered.length === 1 ? "" : "s"}
+        {query || categoryFilter ? " match" : " in catalogue"}
+      </p>
+
+      <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-ink/10">
         {filtered.map((p) => (
           <button
             key={p.product_id}
@@ -207,6 +264,8 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
               <span className="block text-xs text-ink-muted">
                 {p.category || "General"}
                 {p.sku ? ` · ${p.sku}` : ""}
+                {" · "}
+                <span className="text-forest">Customizer</span>
               </span>
             </span>
             <span className="shrink-0 tabular-nums text-ink-muted">{money(p.selling_price)}</span>

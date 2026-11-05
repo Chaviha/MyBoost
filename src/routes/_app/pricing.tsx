@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
 import { MoreActions } from "@/components/more-actions";
 import { Toolbar } from "@/components/app-shell";
+import { SearchFilter } from "@/components/search-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,6 +21,7 @@ import { useLife } from "@/lib/store";
 export const Route = createFileRoute("/_app/pricing")({ component: SmartPricingPage });
 
 function SmartPricingPage() {
+  const [searchQuery, setSearchQuery] = useState("");
   const {
     selectedBusiness,
     businessProducts,
@@ -44,6 +46,7 @@ function SmartPricingPage() {
   if (!selectedBusiness) return <EmptyState icon={Calculator} text="Add a business first." />;
 
   const products = businessProducts.filter((p) => (p.item_kind || "product") !== "service");
+  const qSearch = searchQuery.trim().toLowerCase();
   const references = products;
   const preview = useMemo(
     () => products.map((p) => ({ p, suggested: smartProductPrice(p, products, pricingSettings.default_markup_percent) })),
@@ -83,7 +86,12 @@ function SmartPricingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {preview.map(({ p, suggested }) => (
+                  {preview
+                  .filter(({ p }) => {
+                    if (!qSearch) return true;
+                    return `${p.name} ${p.sku ?? ""} ${p.category ?? ""}`.toLowerCase().includes(qSearch);
+                  })
+                  .map(({ p, suggested }) => (
                     <tr key={p.product_id} className="border-b border-line last:border-0">
                       <td className="px-2 py-3">
                         <div className="font-medium">{p.name}</div>
@@ -173,7 +181,12 @@ function SmartPricingPage() {
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <RateCard title="Labour rates" action="Add labour" onAdd={() => setLabourOpen(true)}>
-          {businessLabourRates.map((r) => (
+          {businessLabourRates
+            .filter((r) => {
+              if (!qSearch) return true;
+              return `${r.name ?? ""} ${r.unit ?? ""}`.toLowerCase().includes(qSearch);
+            })
+            .map((r) => (
             <div key={r.labour_rate_id} className="flex items-center justify-between border-b border-line py-3 last:border-0">
               <div><p className="font-medium">{r.profession}</p><p className="text-xs text-ink-muted">{r.workers_default} worker(s) · per {r.rate_unit}</p></div>
               <div className="flex items-center gap-2"><span className="font-medium">{money(r.rate)}</span><MoreActions actions={[{ label: "Delete", icon: <Trash2 className="size-4" />, destructive: true, onSelect: () => deleteLabourRate(r.labour_rate_id) }]} /></div>
@@ -181,7 +194,12 @@ function SmartPricingPage() {
           ))}
         </RateCard>
         <RateCard title="Transport rates" action="Add vehicle" onAdd={() => setTransportOpen(true)}>
-          {businessTransportRates.map((r) => (
+          {businessTransportRates
+            .filter((r) => {
+              if (!qSearch) return true;
+              return `${r.name ?? ""} ${r.unit ?? ""}`.toLowerCase().includes(qSearch);
+            })
+            .map((r) => (
             <div key={r.transport_rate_id} className="flex items-center justify-between border-b border-line py-3 last:border-0">
               <div><p className="font-medium">{r.vehicle}</p><p className="text-xs text-ink-muted">{r.capacity_tonnes} tonne capacity · per km</p></div>
               <div className="flex items-center gap-2"><span className="font-medium">{money(r.rate_per_km)}/km</span><MoreActions actions={[{ label: "Delete", icon: <Trash2 className="size-4" />, destructive: true, onSelect: () => deleteTransportRate(r.transport_rate_id) }]} /></div>

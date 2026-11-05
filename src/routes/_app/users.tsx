@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
 import { PageHeader } from "@/components/page-header";
+import { SearchFilter } from "@/components/search-filter";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
@@ -15,6 +17,7 @@ export const Route = createFileRoute("/_app/users")({
 });
 
 function UsersPage() {
+  const [searchQuery, setSearchQuery] = useState("");
   const { state, setUserLevel, can, currentUser } = useLife();
 
   if (!can("manage_users")) {
@@ -28,8 +31,15 @@ function UsersPage() {
         title="Users & roles"
         subtitle="Promote or restrict access. Admin, owner, and employee each see a different workspace."
       />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search users…" />
       <Card className="overflow-hidden p-0">
-        {state.users.map((user) => (
+      {state.users
+        .filter((user) => {
+          const q = searchQuery.trim().toLowerCase();
+          if (!q) return true;
+          return `${user.name} ${user.email ?? ""} ${user.role ?? ""} ${user.user_id}`.toLowerCase().includes(q);
+        })
+        .map((user) => (
           <div
             key={user.user_id}
             className="flex flex-col gap-3 border-b border-line px-4 py-4 last:border-0 sm:flex-row sm:items-center"

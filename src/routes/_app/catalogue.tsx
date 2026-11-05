@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Boxes, BriefcaseBusiness, Layers, ListTree, Package, Tags } from "lucide-react";
 import { AccessDenied } from "@/components/access-denied";
 import { Toolbar } from "@/components/app-shell";
+import { SearchFilter } from "@/components/search-filter";
 import { CatalogueSubnav } from "@/components/catalogue-subnav";
 import { EmptyState } from "@/components/empty-state";
 import { Card } from "@/components/ui/card";
@@ -50,6 +52,7 @@ const TREE = [
 
 function CatalogueOverviewPage() {
   const { selectedBusiness, can } = useLife();
+  const [searchQuery, setSearchQuery] = useState("");
 
   if (!can("view_products")) {
     return <AccessDenied need="Catalogue is for business owners and staff with product access." />;
@@ -64,6 +67,7 @@ function CatalogueOverviewPage() {
         title="Catalogue"
         subtitle={`${selectedBusiness.business_name} — categories, products and services`}
       />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search catalogue sections…" />
       <CatalogueSubnav />
 
       <div className="mb-6 rounded-xl border border-line bg-paper p-4 text-sm text-ink-muted">
@@ -73,7 +77,16 @@ function CatalogueOverviewPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {TREE.map((node) => (
+        {TREE
+          .filter((node) => {
+            const q = searchQuery.trim().toLowerCase();
+            if (!q) return true;
+            const child = ("children" in node && node.children
+              ? node.children.map((c) => c.label).join(" ")
+              : "");
+            return `${node.title} ${node.blurb} ${child}`.toLowerCase().includes(q);
+          })
+          .map((node) => (
           <Card key={node.to} className="flex flex-col p-5">
             <Link
               to={node.to}

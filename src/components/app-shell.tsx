@@ -1,5 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
+  ArrowLeft,
   Bell,
   Boxes,
   Building2,
@@ -540,15 +541,34 @@ export function Toolbar({
   subtitle,
   actionLabel,
   onAction,
+  hideBack,
 }: {
   title: string;
   subtitle?: string;
   actionLabel?: string;
   onAction?: () => void;
+  /** Set true only on Home if you prefer no back control. */
+  hideBack?: boolean;
 }) {
   return (
     <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
+        {!hideBack ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== "undefined" && window.history.length > 1) {
+                window.history.back();
+              } else if (typeof window !== "undefined") {
+                window.location.assign("/");
+              }
+            }}
+            className="mb-2 inline-flex items-center gap-1 text-xs font-medium text-ink-muted hover:text-ink"
+          >
+            <ArrowLeft className="size-3.5" />
+            Back
+          </button>
+        ) : null}
         <h1 className="font-display text-[1.75rem] sm:text-3xl leading-tight font-medium tracking-tight text-ink">
           {title}
         </h1>

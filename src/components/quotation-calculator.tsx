@@ -138,7 +138,7 @@ export function CustomQuotationCalculator({
 
       <p className="text-xs text-ink-muted">
         Formula examples: <code>=QTY*RATE</code>, <code>=IF(QTY&gt;10,RATE*0.9,RATE)</code>,{" "}
-        <code>=SINDEG(30)*QTY</code>. Supports + − × ÷, parentheses, SIN/COS/TAN, SINDEG/COSDEG/TANDEG,
+        <code>=SINDEG(30)*QTY</code>. Supports + − × ÷, parentheses, SIN/COS/TAN (degrees), SINRAD/COSRAD/TANRAD (radians),
         IF, AND/OR/NOT, ABS/SQRT/MIN/MAX/ROUND, PI(). Each row calculates independently.
       </p>
 

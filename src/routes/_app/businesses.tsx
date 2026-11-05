@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
 import { MoreActions } from "@/components/more-actions";
 import { Toolbar } from "@/components/app-shell";
+import { SearchFilter } from "@/components/search-filter";
 import { Field } from "@/components/field";
 import { ListingCover } from "@/components/listing-cover";
 import { MediaManagerDialog, MediaPicker } from "@/components/media-manager";
@@ -43,6 +44,7 @@ function BusinessesPage() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [mediaForId, setMediaForId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const mediaFor = visibleBusinesses.find((b) => b.business_id === mediaForId) || null;
 
   if (!can("manage_own_businesses")) {
@@ -57,8 +59,15 @@ function BusinessesPage() {
         actionLabel="Add business"
         onAction={() => setOpen(true)}
       />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search businesses…" />
       <div className="grid gap-3 sm:grid-cols-2">
-        {visibleBusinesses.map((b) => (
+        {visibleBusinesses
+          .filter((b) => {
+            const q = searchQuery.trim().toLowerCase();
+            if (!q) return true;
+            return `${b.business_name} ${b.business_type ?? ""} ${b.location ?? ""}`.toLowerCase().includes(q);
+          })
+          .map((b) => (
           <Card key={b.business_id} className="overflow-hidden p-0">
             <ListingCover
               src={b.image_url}

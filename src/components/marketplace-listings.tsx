@@ -6,10 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PagedGrid } from "@/components/paged-grid";
 import { money } from "@/lib/format";
 import type { MarketplaceListing } from "@/lib/types";
 
-export type MarketKind = "all" | "product" | "service" | "asset" | "professional";
+export type MarketKind = "all" | "product" | "service" | "asset" | "professional" | "business";
 
 function openWhatsApp(phone: string, text: string) {
   const digits = (phone || "").replace(/[^0-9]/g, "");
@@ -49,6 +50,7 @@ export function MarketKindChips({
     { value: "service", label: "Services" },
     { value: "asset", label: "Assets" },
     { value: "professional", label: "Professionals" },
+    { value: "business", label: "Businesses" },
   ];
   return (
     <div className="mb-5 flex flex-wrap gap-2">
@@ -68,7 +70,7 @@ export function MarketKindChips({
 
 /** Which listings the current chip + search show. Products/services only appear under All, Products or Services. */
 export function filterListings(items: MarketplaceListing[], kind: MarketKind, query: string) {
-  if (kind === "asset" || kind === "professional") return [];
+  if (kind === "asset" || kind === "professional" || kind === "business") return [];
   const q = query.trim().toLowerCase();
   return items.filter(
     (item) =>
@@ -80,7 +82,7 @@ export function filterListings(items: MarketplaceListing[], kind: MarketKind, qu
 }
 
 /** Product and service cards with a details window. Pass the already-filtered items. */
-export function MarketplaceListings({ items }: { items: MarketplaceListing[] }) {
+export function MarketplaceListings({ items, resetKey = "" }: { items: MarketplaceListing[]; resetKey?: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = selectedId
     ? (items.find((item) => item.product_id === selectedId) ?? null)
@@ -89,10 +91,12 @@ export function MarketplaceListings({ items }: { items: MarketplaceListing[] }) 
   return (
     <div>
       {items.length ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((item) => (
+        <PagedGrid
+          items={items}
+          resetKey={resetKey}
+          getKey={(item) => item.product_id}
+          renderItem={(item) => (
             <Card
-              key={item.product_id}
               className="cursor-pointer overflow-hidden p-0 transition hover:-translate-y-0.5"
               onClick={() => setSelectedId(item.product_id)}
             >
@@ -121,8 +125,8 @@ export function MarketplaceListings({ items }: { items: MarketplaceListing[] }) 
                 </Button>
               </div>
             </Card>
-          ))}
-        </div>
+          )}
+        />
       ) : null}
 
       <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelectedId(null)}>

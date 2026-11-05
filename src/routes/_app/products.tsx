@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Boxes, Calculator, Download, FileSpreadsheet, FileUp, ImagePlus, Package, Pencil, Share2, Table2, Trash2 } from "lucide-react";
+import { Boxes, Calculator, Columns3, Download, FileSpreadsheet, FileUp, ImagePlus, Package, Pencil, Share2, Table2, Trash2 } from "lucide-react";
 import { MoreActions } from "@/components/more-actions";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -82,12 +82,16 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
   const [listOpen, setListOpen] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [customizerEditId, setCustomizerEditId] = useState<string | null>(null);
+  const [builderEditId, setBuilderEditId] = useState<string | null>(null);
   const [familyFilter, setFamilyFilter] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [tableCategoryId, setTableCategoryId] = useState("");
   const [mediaForId, setMediaForId] = useState<string | null>(null);
   const [viewerForId, setViewerForId] = useState<string | null>(null);
   const mediaFor = businessProducts.find((p) => p.product_id === mediaForId) || null;
+  const builderEditProduct = builderEditId
+    ? (businessProducts.find((p) => p.product_id === builderEditId) ?? null)
+    : null;
   const viewerFor = businessProducts.find((p) => p.product_id === viewerForId) || null;
   const viewerCover = viewerFor ? itemCoverUrl(viewerFor) : "";
   const [viewerPreviewUrl, setViewerPreviewUrl] = useState("");
@@ -431,7 +435,8 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                                 toast.success("Product deleted.");
                               }
                             }}
-                            onCustomizerEdit={p.customizer?.unlocked?.length ? () => setCustomizerEditId(p.product_id) : undefined}
+                            onCustomizerEdit={(p.customizer?.columns?.length || p.customizer?.unlocked?.length) ? () => setCustomizerEditId(p.product_id) : undefined}
+                      onBuilderEdit={p.customizer?.columns?.length ? () => setBuilderEditId(p.product_id) : undefined}
                     />
                         </td>
                       </tr>
@@ -522,7 +527,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                         <span className="ml-1 text-sm font-sans font-normal text-ink-muted">/ {p.unit}</span>
                       </p>
                       <p className="text-xs text-ink-muted">{p.stock} in stock</p>
-                      {p.customizer?.unlocked?.length ? (
+                      {(p.customizer?.columns?.length || p.customizer?.unlocked?.length) ? (
                         <div className="mt-2">
                           <ProductCustomizerEditTrigger
                             product={p}
@@ -557,7 +562,8 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                           toast.success("Product deleted.");
                         }
                       }}
-                      onCustomizerEdit={p.customizer?.unlocked?.length ? () => setCustomizerEditId(p.product_id) : undefined}
+                      onCustomizerEdit={(p.customizer?.columns?.length || p.customizer?.unlocked?.length) ? () => setCustomizerEditId(p.product_id) : undefined}
+                      onBuilderEdit={p.customizer?.columns?.length ? () => setBuilderEditId(p.product_id) : undefined}
                     />
                   </div>
                 </div>
@@ -673,7 +679,16 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                 const cat = businessCategories.find((c) => c.category_id === activeCategoryId);
                 const rows = (payload.meta as { rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }> }).rows;
                 const primary = rows?.[0];
-                const columns = (payload.meta as { columns?: unknown }).columns as import("@/lib/types").ProductCustomizerColumn[] | undefined;
+                const rawCols = (payload.meta as { columns?: import("@/lib/types").ProductCustomizerColumn[] }).columns || [];
+                const columns = rawCols.map((c) => ({
+                  key: c.key,
+                  label: c.label || c.key,
+                  type: c.type,
+                  formula: c.formula,
+                  editableByQuoter: c.editableByQuoter !== false,
+                  unit: c.unit,
+                  sizeLocked: !!c.sizeLocked,
+                }));
                 const productId = addProduct({
                   name: payload.description,
                   category: meta.category || cat?.name || "Custom",
@@ -688,7 +703,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   itemKind: "product",
                   customizer: {
                     calculator: "advanced-spreadsheet",
-                    columns: columns || [],
+                    columns,
                     cells: (primary?.cells || {}) as Record<string, string | number | null>,
                     formulas: primary?.formulas,
                     unlocked: meta.unlocked || [],
@@ -825,10 +840,63 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
       </Dialog>
 
 
+      <Dialog open={Boolean(builderEditProduct)} onOpenChange={(v) => !v && setBuilderEditId(null)}>
+        <DialogContent className="w-[min(calc(100%-1rem),56rem)] max-h-[92dvh]">
+          <DialogHeader>
+            <DialogTitle>Edit in product customizer</DialogTitle>
+          </DialogHeader>
+          {builderEditProduct ? (
+            <AdvancedQuotationCalculator
+              key={builderEditProduct.product_id}
+              products={businessProducts.filter((x) => x.product_id !== builderEditProduct.product_id)}
+              mode="product_creator"
+              initialProduct={builderEditProduct}
+              onAddToProduct={(payload) => {
+                const meta = payload.meta as {
+                  sku?: string;
+                  category?: string;
+                  columns?: import("@/lib/types").ProductCustomizerColumn[];
+                  rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }>;
+                  unlocked?: Array<{ key: string; label: string; type: string; unit?: string }>;
+                };
+                const primary = meta.rows?.[0];
+                updateProduct(builderEditProduct.product_id, {
+                  name: payload.description,
+                  unit: payload.unit || builderEditProduct.unit,
+                  category: meta.category || builderEditProduct.category,
+                  sku: meta.sku ?? builderEditProduct.sku,
+                  cost_price: Number(payload.cost_price) || 0,
+                  selling_price: Number(payload.selling_price) || 0,
+                  specs: { ...(builderEditProduct.specs || {}), ...payload.specs },
+                  customizer: {
+                    calculator: "advanced-spreadsheet",
+                    columns: (meta.columns || []).map((c) => ({
+                      key: c.key,
+                      label: c.label || c.key,
+                      type: c.type,
+                      formula: c.formula,
+                      editableByQuoter: c.editableByQuoter !== false,
+                      unit: c.unit,
+                      sizeLocked: !!c.sizeLocked,
+                    })),
+                    cells: (primary?.cells || {}) as Record<string, string | number | null>,
+                    formulas: primary?.formulas,
+                    unlocked: meta.unlocked || [],
+                    total: payload.cost_price,
+                  },
+                });
+                setBuilderEditId(null);
+              }}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
       {customizerEditId && businessProducts.some((x) => x.product_id === customizerEditId) ? (
         <ProductCustomizerEditDialog
           product={businessProducts.find((x) => x.product_id === customizerEditId)!}
           open
+          creatorMode
           onOpenChange={(v) => {
             if (!v) setCustomizerEditId(null);
           }}
@@ -867,12 +935,14 @@ function ProductMoreMenu({
   onImages,
   onDelete,
   onCustomizerEdit,
+  onBuilderEdit,
 }: {
   isService?: boolean;
   onEdit: () => void;
   onImages: () => void;
   onDelete: () => void;
   onCustomizerEdit?: () => void;
+  onBuilderEdit?: () => void;
 }) {
   const noun = isService ? "service" : "product";
   return (
@@ -881,7 +951,10 @@ function ProductMoreMenu({
       actions={[
         { label: `Edit ${noun}`, icon: <Pencil className="size-3.5" />, onSelect: onEdit },
         ...(onCustomizerEdit
-          ? [{ label: "Edit custom fields", icon: <Calculator className="size-3.5" />, onSelect: onCustomizerEdit }]
+          ? [{ label: "Edit customized product", icon: <Calculator className="size-3.5" />, onSelect: onCustomizerEdit }]
+          : []),
+        ...(onBuilderEdit
+          ? [{ label: "Edit in product customizer", icon: <Columns3 className="size-3.5" />, onSelect: onBuilderEdit }]
           : []),
         { label: "Manage images", icon: <ImagePlus className="size-3.5" />, onSelect: onImages },
         { label: `Delete ${noun}`, icon: <Trash2 className="size-3.5" />, destructive: true, onSelect: onDelete },

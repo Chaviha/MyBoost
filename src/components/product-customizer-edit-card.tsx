@@ -54,6 +54,8 @@ type Props = {
   product: Product;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** When true (product creator / catalogue owner), locked sizes are editable. Quoters: false. */
+  creatorMode?: boolean;
   onSave: (patch: {
     specs?: SpecValues;
     cost_price?: number;
@@ -62,8 +64,14 @@ type Props = {
   }) => void;
 };
 
-/** Dialog card: view/edit unlocked customizer fields for a catalogue product. */
-export function ProductCustomizerEditDialog({ product, open, onOpenChange, onSave }: Props) {
+/** Dialog card: edit customizer fields. Locked fields only when creatorMode. */
+export function ProductCustomizerEditDialog({
+  product,
+  open,
+  onOpenChange,
+  onSave,
+  creatorMode = false,
+}: Props) {
   const config = product.customizer;
   const [cells, setCells] = useState<Record<string, string | number | null>>(
     () => ({ ...(config?.cells || {}) }),
@@ -77,6 +85,37 @@ export function ProductCustomizerEditDialog({ product, open, onOpenChange, onSav
   }, [open, product.product_id, config]);
 
   const unlocked = config?.unlocked || [];
+  /** Only unlocked fields are shown: locked sizes and columns with Editable unchecked are hidden. */
+  const editableFields = (() => {
+    if (config?.columns?.length) {
+      return config.columns
+        .filter((c) => {
+          if (c.type === "formula") return false;
+          if (c.type === "size" && c.sizeLocked) return false;
+          if (c.editableByQuoter === false) return false;
+          return true;
+        })
+        .map((c) => {
+          const lockedForQuoter =
+            c.editableByQuoter === false || (c.type === "size" && !!c.sizeLocked);
+          return {
+            key: c.key,
+            label: c.label,
+            type: c.type,
+            unit: c.unit,
+            locked: lockedForQuoter,
+          };
+        });
+    }
+    return unlocked.map((u) => ({
+      key: u.key,
+      label: u.label,
+      type: u.type,
+      unit: u.unit,
+      locked: false,
+    }));
+  })();
+  const quoterEditableFields = editableFields;
   const computed = useMemo(() => {
     if (!config) return { cells, total: product.selling_price, error: undefined as string | undefined };
     return evaluateFormulas(cells, config);
@@ -95,7 +134,7 @@ export function ProductCustomizerEditDialog({ product, open, onOpenChange, onSav
       return;
     }
     const specs: SpecValues = { ...(product.specs || {}) };
-    for (const u of unlocked) {
+    for (const u of editableFields) {
       const v = computed.cells[u.key];
       if (v !== null && v !== undefined && v !== "") {
         specs[u.key.toLowerCase()] = v as string | number;
@@ -120,10 +159,10 @@ export function ProductCustomizerEditDialog({ product, open, onOpenChange, onSav
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(calc(100%-2rem),28rem)] max-h-[min(90dvh,36rem)]">
         <DialogHeader>
-          <DialogTitle>Edit custom fields</DialogTitle>
+          <DialogTitle>Edit customized product</DialogTitle>
           <DialogDescription>
-            Unlocked fields for <span className="font-medium text-ink">{product.name}</span>. Locked
-            sizes stay fixed.
+            Customizer fields for <span className="font-medium text-ink">{product.name}</span>.
+            {" Only unlocked fields are shown."}
           </DialogDescription>
         </DialogHeader>
 
@@ -138,37 +177,44 @@ export function ProductCustomizerEditDialog({ product, open, onOpenChange, onSav
             </div>
           </div>
 
-          {unlocked.length === 0 ? (
-            <p className="text-xs text-ink-muted">No unlocked fields on this product.</p>
+          {editableFields.length === 0 ? (
+            <p className="text-xs text-ink-muted">No customizer fields on this product.</p>
           ) : (
-            <div className="grid gap-2">
-              {unlocked.map((u) => {
-                const isNumeric = u.type === "number" || u.type === "size";
-                const value = cells[u.key];
-                return (
-                  <div key={u.key} className="rounded-md border border-ink/10 bg-paper px-3 py-2">
-                    <label className="mb-1 block text-xs text-ink-muted">
-                      {u.label}
-                      {u.unit ? ` (${u.unit})` : ""}
-                    </label>
-                    <Input
-                      className="h-9"
-                      type={isNumeric ? "number" : "text"}
-                      min={isNumeric ? 0 : undefined}
-                      step={u.type === "size" ? "any" : undefined}
-                      value={value === null || value === undefined ? "" : String(value)}
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        if (isNumeric) {
-                          updateField(u.key, raw === "" ? 0 : Number(raw));
-                        } else {
-                          updateField(u.key, raw);
-                        }
-                      }}
-                    />
+            <div className="space-y-4">
+              {quoterEditableFields.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-ink-muted">Unlocked columns</p>
+                  <div className="grid gap-2">
+                    {quoterEditableFields.map((u) => {
+                      const isNumeric = u.type === "number" || u.type === "size";
+                      const value = cells[u.key];
+                      return (
+                        <div key={u.key} className="rounded-md border border-ink/10 bg-paper px-3 py-2">
+                          <label className="mb-1 block text-xs text-ink-muted">
+                            {u.label}
+                            {u.unit ? ` (${u.unit})` : ""}
+                          </label>
+                          <Input
+                            className="h-9"
+                            type={isNumeric ? "number" : "text"}
+                            min={isNumeric ? 0 : undefined}
+                            step={u.type === "size" ? "any" : undefined}
+                            value={value === null || value === undefined ? "" : String(value)}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              if (isNumeric) {
+                                updateField(u.key, raw === "" ? 0 : Number(raw));
+                              } else {
+                                updateField(u.key, raw);
+                              }
+                            }}
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -201,11 +247,11 @@ export function ProductCustomizerEditTrigger({
   product: Product;
   onClick: () => void;
 }) {
-  if (!product.customizer?.unlocked?.length) return null;
+  if (!product.customizer?.columns?.length && !product.customizer?.unlocked?.length) return null;
   return (
     <Button type="button" size="sm" variant="secondary" onClick={onClick}>
       <Package className="mr-1 size-3.5" />
-      Edit custom fields
+      Edit customized product
     </Button>
   );
 }

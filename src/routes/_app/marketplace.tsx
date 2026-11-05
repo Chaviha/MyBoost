@@ -14,7 +14,7 @@ import {
   Search,
   Store,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
@@ -26,6 +26,7 @@ import {
   type MarketKind,
 } from "@/components/marketplace-listings";
 import { PageHeader } from "@/components/page-header";
+import { PagedGrid } from "@/components/paged-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -110,7 +111,6 @@ function businessMedia(business: Business): MarketplaceMedia[] {
 function MarketplacePage() {
   const {
     publicMarketplace,
-    refreshPublicMarketplace,
     viewAsset,
     contactAsset,
     viewProfessional,
@@ -133,20 +133,6 @@ function MarketplacePage() {
   const [zoom, setZoom] = useState(1);
   const seen = useRef(new Set<string>());
 
-  useEffect(() => {
-    void refreshPublicMarketplace();
-
-    const onFocus = () => {
-      void refreshPublicMarketplace();
-    };
-
-    window.addEventListener("focus", onFocus);
-
-    return () => {
-      window.removeEventListener("focus", onFocus);
-    };
-  }, []);
-
   const ql = q.trim().toLowerCase();
 
   const assets = (publicMarketplace.assets as Asset[]).filter((a) =>
@@ -162,12 +148,19 @@ function MarketplacePage() {
   const listings = filterListings(publicMarketplace.listings, kind, q);
   const showAssets = kind === "all" || kind === "asset";
   const showPros = kind === "all" || kind === "professional";
-  const nothingToShow =
-    listings.length === 0 && !(showAssets && assets.length > 0) && !(showPros && pros.length > 0);
+  const showBusinesses = kind === "all" || kind === "business";
 
   const firms = (publicMarketplace.businesses as Business[]).filter((b) =>
     `${b.business_name} ${b.tagline} ${b.region}`.toLowerCase().includes(ql),
   );
+
+  const nothingToShow =
+    listings.length === 0 &&
+    !(showAssets && assets.length > 0) &&
+    !(showPros && pros.length > 0) &&
+    !(showBusinesses && firms.length > 0);
+
+  const resetKey = `${kind}|${ql}`;
 
   const selectedMarketplaceBusiness = businessDetailId
     ? (firms.find((b) => b.business_id === businessDetailId) ?? null)
@@ -201,6 +194,88 @@ function MarketplacePage() {
     setMediaViewer(null);
     setZoom(1);
   }
+
+  const renderBusiness = (b: Business) => (
+                <Card
+                  className="cursor-pointer overflow-hidden p-0 transition hover:-translate-y-0.5"
+                  onMouseEnter={() => once(`b:${b.business_id}`, () => viewBusiness(b.business_id))}
+                  onClick={() => setBusinessDetailId(b.business_id)}
+                >
+                  <div className="relative">
+                    <ListingCover
+                      src={b.image_url}
+                      alt={b.business_name}
+                      type={b.business_type}
+                      className="h-40"
+                    />
+                    <button
+                      type="button"
+                      className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg bg-black/75 px-3 py-2 text-xs text-white"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openMedia(b.business_name, businessMedia(b));
+                      }}
+                      aria-label={`View photos and videos of ${b.business_name}`}
+                    >
+                      <Maximize2 className="size-4" />
+                      View media
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col gap-2 p-5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium tracking-[0.14em] text-forest uppercase">
+                        {b.business_type}
+                      </p>
+                      <Badge
+                        tone={String(b.status).toLowerCase() === "closed" ? "amber" : "forest"}
+                      >
+                        {String(b.status).toLowerCase() === "closed" ? "Closed" : "Open"}
+                      </Badge>
+                    </div>
+
+                    <h3 className="font-display text-xl font-medium tracking-tight">
+                      {b.business_name}
+                    </h3>
+
+                    <p className="text-sm text-ink-muted">{b.tagline || b.business_type}</p>
+
+                    {b.region ? (
+                      <p className="inline-flex items-center gap-1 text-xs text-ink-muted">
+                        <MapPin className="size-3" />
+                        {b.region}
+                      </p>
+                    ) : null}
+
+                    <div className="mt-1 flex items-center gap-3 text-xs text-ink-muted">
+                      <span className="inline-flex items-center gap-1">
+                        <Eye className="size-3.5" />
+                        {b.views}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <MessageCircle className="size-3.5" />
+                        {b.whatsapp_clicks}
+                      </span>
+                    </div>
+
+                    <Button
+                      className="mt-1"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        contactBusiness(b.business_id);
+                        openWhatsApp(
+                          b.phone,
+                          `Hi, I found ${b.business_name} on LifeBoost Marketplace.`,
+                        );
+                        toast.success(`Opening WhatsApp for ${b.business_name}.`);
+                      }}
+                    >
+                      <MessageCircle className="size-4" />
+                      Contact on WhatsApp
+                    </Button>
+                  </div>
+                </Card>
+  );
 
   return (
     <>
@@ -242,7 +317,7 @@ function MarketplacePage() {
               {kind === "all" ? (
                 <h2 className="mb-3 font-display text-lg font-medium">Products &amp; services</h2>
               ) : null}
-              <MarketplaceListings items={listings} />
+              <MarketplaceListings items={listings} resetKey={resetKey} />
             </section>
           ) : null}
 
@@ -254,13 +329,15 @@ function MarketplacePage() {
               {assets.length === 0 ? (
                 <EmptyState icon={Store} text={q ? "No assets match." : "No assets listed yet."} />
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {assets.map((asset) => {
+                <PagedGrid
+                  items={assets}
+                  resetKey={resetKey}
+                  getKey={(asset) => asset.asset_id}
+                  renderItem={(asset) => {
                     const items = assetMedia(asset);
 
                     return (
                       <Card
-                        key={asset.asset_id}
                         className="overflow-hidden p-0"
                         onMouseEnter={() =>
                           once(`a:${asset.asset_id}`, () => viewAsset(asset.asset_id))
@@ -391,8 +468,8 @@ function MarketplacePage() {
                         </div>
                       </Card>
                     );
-                  })}
-                </div>
+                  }}
+                />
               )}
             </section>
           ) : null}
@@ -408,10 +485,12 @@ function MarketplacePage() {
                   text={q ? "No professionals match." : "No professionals listed yet."}
                 />
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {pros.map((p) => (
+                <PagedGrid
+                  items={pros}
+                  resetKey={resetKey}
+                  getKey={(p) => p.employee_id}
+                  renderItem={(p) => (
                     <Card
-                      key={p.employee_id}
                       className="overflow-hidden p-0"
                       onMouseEnter={() =>
                         once(`p:${p.employee_id}`, () => viewProfessional(p.employee_id))
@@ -480,9 +559,23 @@ function MarketplacePage() {
                         </Button>
                       </div>
                     </Card>
-                  ))}
-                </div>
+                  )}
+                />
               )}
+            </section>
+          ) : null}
+
+          {showBusinesses && firms.length > 0 ? (
+            <section className="mb-8">
+              {kind === "all" ? (
+                <h2 className="mb-3 font-display text-lg font-medium">Businesses</h2>
+              ) : null}
+              <PagedGrid
+                items={firms}
+                resetKey={resetKey}
+                getKey={(b) => b.business_id}
+                renderItem={renderBusiness}
+              />
             </section>
           ) : null}
         </TabsContent>
@@ -495,90 +588,12 @@ function MarketplacePage() {
               text={q ? "No businesses match." : "No businesses listed yet."}
             />
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {firms.map((b) => (
-                <Card
-                  key={b.business_id}
-                  className="cursor-pointer overflow-hidden p-0 transition hover:-translate-y-0.5"
-                  onMouseEnter={() => once(`b:${b.business_id}`, () => viewBusiness(b.business_id))}
-                  onClick={() => setBusinessDetailId(b.business_id)}
-                >
-                  <div className="relative">
-                    <ListingCover
-                      src={b.image_url}
-                      alt={b.business_name}
-                      type={b.business_type}
-                      className="h-40"
-                    />
-                    <button
-                      type="button"
-                      className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg bg-black/75 px-3 py-2 text-xs text-white"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openMedia(b.business_name, businessMedia(b));
-                      }}
-                      aria-label={`View photos and videos of ${b.business_name}`}
-                    >
-                      <Maximize2 className="size-4" />
-                      View media
-                    </button>
-                  </div>
-
-                  <div className="flex flex-col gap-2 p-5">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-medium tracking-[0.14em] text-forest uppercase">
-                        {b.business_type}
-                      </p>
-                      <Badge
-                        tone={String(b.status).toLowerCase() === "closed" ? "amber" : "forest"}
-                      >
-                        {String(b.status).toLowerCase() === "closed" ? "Closed" : "Open"}
-                      </Badge>
-                    </div>
-
-                    <h3 className="font-display text-xl font-medium tracking-tight">
-                      {b.business_name}
-                    </h3>
-
-                    <p className="text-sm text-ink-muted">{b.tagline || b.business_type}</p>
-
-                    {b.region ? (
-                      <p className="inline-flex items-center gap-1 text-xs text-ink-muted">
-                        <MapPin className="size-3" />
-                        {b.region}
-                      </p>
-                    ) : null}
-
-                    <div className="mt-1 flex items-center gap-3 text-xs text-ink-muted">
-                      <span className="inline-flex items-center gap-1">
-                        <Eye className="size-3.5" />
-                        {b.views}
-                      </span>
-                      <span className="inline-flex items-center gap-1">
-                        <MessageCircle className="size-3.5" />
-                        {b.whatsapp_clicks}
-                      </span>
-                    </div>
-
-                    <Button
-                      className="mt-1"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        contactBusiness(b.business_id);
-                        openWhatsApp(
-                          b.phone,
-                          `Hi, I found ${b.business_name} on LifeBoost Marketplace.`,
-                        );
-                        toast.success(`Opening WhatsApp for ${b.business_name}.`);
-                      }}
-                    >
-                      <MessageCircle className="size-4" />
-                      Contact on WhatsApp
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
+            <PagedGrid
+              items={firms}
+              resetKey={resetKey}
+              getKey={(b) => b.business_id}
+              renderItem={renderBusiness}
+            />
           )}
         </TabsContent>
       </Tabs>

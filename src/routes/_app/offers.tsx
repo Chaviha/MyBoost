@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Briefcase, Gift, Users } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { SearchFilter } from "@/components/search-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -26,6 +28,7 @@ function offerTone(status: string) {
 }
 
 function OffersPage() {
+  const [searchQuery, setSearchQuery] = useState("");
   const { myOffers, acceptOffer, declineOffer } = useLife();
 
   return (
@@ -35,11 +38,18 @@ function OffersPage() {
         title="Offers"
         subtitle="Employment invites, customer tabs, and work offers sent to this account."
       />
+      <SearchFilter onSearch={setSearchQuery} placeholder="Search offers…" />
       {myOffers.length === 0 ? (
         <EmptyState icon={Gift} text="No offers right now." />
       ) : (
         <div className="flex flex-col gap-3">
-          {myOffers.map((o) => {
+          {myOffers
+            .filter((o) => {
+              const q = searchQuery.trim().toLowerCase();
+              if (!q) return true;
+              return `${o.title} ${o.from} ${o.status} ${o.kind ?? ""}`.toLowerCase().includes(q);
+            })
+            .map((o) => {
             const Icon = offerIcon(o.kind);
             return (
               <Card key={o.offer_id} className="flex flex-wrap items-center justify-between gap-3 p-5">

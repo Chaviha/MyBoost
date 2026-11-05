@@ -18,8 +18,6 @@ import { toast } from "sonner";
 import { AccessDenied } from "@/components/access-denied";
 import { downloadQuoteHtml, printQuotePdf } from "@/lib/quote-export";
 import { MoreActions } from "@/components/more-actions";
-import { CustomQuotationCalculator } from "@/components/quotation-calculator";
-import { AdvancedQuotationCalculator } from "@/components/advanced-quotation-calculator";
 import { CustomizerQuoteBuilder } from "@/components/customizer-quote-builder";
 import { Toolbar } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
@@ -77,17 +75,6 @@ const QUOTE_TYPES: { value: QuoteType; label: string; blurb: string }[] = [
     value: "custom_product",
     label: "Materials & Products",
     blurb: "Search products across lifeBoostSME — steel, agriculture, construction & more",
-  },
-  {
-    value: "custom_calculator",
-    label: "Excel Calculator",
-    blurb: "Build a calculation table with editable quantities, rates and formulas",
-  },
-  {
-    value: "product_customizer",
-    label: "Product customizer",
-    blurb:
-      "Excel-style product builder: columns, formulas, lockable sizes — saves to your product catalogue (not a customer quote)",
   },
   {
     value: "customizer_quote",
@@ -770,7 +757,7 @@ function QuoteWizard({
   onSubmit: (form: WizardForm) => void;
   initial?: WizardForm;
 }) {
-  const { publicMarketplace, selectedBusiness, businessProducts, businessServices, currentUser, addProduct } = useLife();
+  const { publicMarketplace, selectedBusiness, businessProducts, businessServices, currentUser } = useLife();
   const [quoteType, setQuoteType] = useState<QuoteType | null>(initial?.quoteType ?? null);
   const [customerId, setCustomerId] = useState(initial?.customerId ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
@@ -903,70 +890,6 @@ function QuoteWizard({
     );
   }
 
-  // Product customizer: catalogue product builder (not a customer quotation)
-  if (quoteType === "product_customizer") {
-    return (
-      <div>
-        <button
-          type="button"
-          className="mb-3 text-xs text-ink-muted hover:text-ink"
-          onClick={() => {
-            setQuoteType(null);
-            setLineItems([]);
-            setSelectedMaterialId("");
-          }}
-        >
-          ← Change quote type
-        </button>
-        <p className="mb-3 text-sm text-ink-muted">
-          Build a costed product and save it to your catalogue. This does not create or send a
-          customer quotation.
-        </p>
-        <AdvancedQuotationCalculator
-          products={catalog}
-          mode="product_creator"
-          onAddToProduct={(payload) => {
-            const meta = (payload.meta || {}) as {
-              sku?: string;
-              category?: string;
-            };
-            const rows = (payload.meta as { rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }> }).rows;
-            const primary = rows?.[0];
-            const columns = (payload.meta as { columns?: import("@/lib/types").ProductCustomizerColumn[] }).columns;
-            const productId = addProduct({
-              name: payload.description,
-              category: meta.category || "Custom",
-              unit: payload.unit || "item",
-              sellingPrice: String(payload.selling_price ?? 0),
-              costPrice: String(payload.cost_price ?? 0),
-              stock: "0",
-              sku: meta.sku || "",
-              description: "Built with product customizer",
-              specs: payload.specs,
-              itemKind: "product",
-              customizer: {
-                calculator: "advanced-spreadsheet",
-                columns: columns || [],
-                cells: (primary?.cells || {}) as Record<string, string | number | null>,
-                formulas: primary?.formulas,
-                unlocked: (payload.meta as { unlocked?: Array<{ key: string; label: string; type: string; unit?: string }> }).unlocked || [],
-                total: payload.cost_price,
-              },
-            });
-            if (productId) {
-              // toast is shown by the builder; close wizard via cancel if parent provides it
-            }
-          }}
-        />
-        <div className="mt-4 flex justify-end">
-          <Button type="button" variant="ghost" onClick={onCancel}>
-            Close
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div>
       <button
@@ -1016,9 +939,7 @@ function QuoteWizard({
         </Field>
       ) : (
         <>
-          {quoteType === "custom_calculator" ? (
-            <CustomQuotationCalculator onAdd={addLineItem} />
-          ) : quoteType === "customizer_quote" ? (
+          {quoteType === "customizer_quote" ? (
             <CustomizerQuoteBuilder products={businessProducts || []} onAdd={addLineItem} />
           ) : (
           <>
@@ -1101,7 +1022,7 @@ function QuoteWizard({
           )}
 
           <LineItemsList items={lineItems} onRemove={removeLineItem} />
-          {quoteType !== "custom_calculator" ? <ExtraChargeBuilder onAdd={addLineItem} /> : null}
+          <ExtraChargeBuilder onAdd={addLineItem} />
         </>
       )}
 

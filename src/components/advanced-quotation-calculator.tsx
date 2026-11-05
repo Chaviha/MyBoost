@@ -138,6 +138,34 @@ function defaultColumns(): CalcColumn[] {
   ];
 }
 
+/** Rebuild the grid (columns + primary row) from a product that was saved with the spreadsheet builder. */
+function seedFromProduct(product?: Product): { columns: CalcColumn[]; row: CalcRow } {
+  const saved = product?.customizer;
+  if (!saved?.columns?.length) {
+    const columns = defaultColumns();
+    return { columns, row: newRow(columns) };
+  }
+  const columns: CalcColumn[] = saved.columns.map((c) => ({
+    id: uid("COL"),
+    key: c.key,
+    label: c.label || c.key,
+    type: c.type,
+    formula: c.formula,
+    editableByQuoter: c.editableByQuoter !== false,
+    unit: c.unit,
+    sizeLocked: !!c.sizeLocked,
+  }));
+  const base = newRow(columns);
+  return {
+    columns,
+    row: {
+      ...base,
+      cells: { ...base.cells, ...(saved.cells || {}) },
+      formulas: { ...(base.formulas || {}), ...(saved.formulas || {}) },
+    },
+  };
+}
+
 function newRow(columns: CalcColumn[]): CalcRow {
   const cells: Record<string, CalcCellValue> = {};
   const formulas: Record<string, string> = {};
@@ -158,6 +186,8 @@ type Props = {
   mode?: "quoter" | "product_creator";
   /** Optional product name context when customizing an existing product. */
   productName?: string;
+  /** Edit mode: open the builder pre-filled with this saved product (columns, formulas, locks, values). */
+  initialProduct?: Product;
   onAddToQuote?: (item: QuoteLineItem) => void;
   /** Called when the creator saves a configuration or produces a costed product line. */
   onAddToProduct?: (payload: {
@@ -174,12 +204,15 @@ export function AdvancedQuotationCalculator({
   products = [],
   mode = "quoter",
   productName,
+  initialProduct,
   onAddToQuote,
   onAddToProduct,
 }: Props) {
   const isCreator = mode === "product_creator";
-  const [columns, setColumns] = useState<CalcColumn[]>(defaultColumns);
-  const [rows, setRows] = useState<CalcRow[]>(() => [newRow(defaultColumns())]);
+  const isEditing = Boolean(initialProduct);
+  const [seed] = useState(() => seedFromProduct(initialProduct));
+  const [columns, setColumns] = useState<CalcColumn[]>(seed.columns);
+  const [rows, setRows] = useState<CalcRow[]>(() => [seed.row]);
   const [showColumnEditor, setShowColumnEditor] = useState(false);
   const [newColLabel, setNewColLabel] = useState("");
   const [newColType, setNewColType] = useState<ColumnType>("number");
@@ -188,10 +221,10 @@ export function AdvancedQuotationCalculator({
   const [added, setAdded] = useState(false);
   const [catalogueSearch, setCatalogueSearch] = useState<Record<string, string>>({});
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [localProductName, setLocalProductName] = useState(productName || "");
-  const [localUnit, setLocalUnit] = useState("item");
-  const [localCategory, setLocalCategory] = useState("");
-  const [localSku, setLocalSku] = useState("");
+  const [localProductName, setLocalProductName] = useState(productName || initialProduct?.name || "");
+  const [localUnit, setLocalUnit] = useState(initialProduct?.unit || "item");
+  const [localCategory, setLocalCategory] = useState(initialProduct?.category || "");
+  const [localSku, setLocalSku] = useState(initialProduct?.sku || "");
   const [saved, setSaved] = useState(false);
 
   const calculated = useMemo(() => {
@@ -283,10 +316,12 @@ export function AdvancedQuotationCalculator({
     setAdded(false);
   }, []);
 
+  /** Locked / non-editable fields: creators only. Quoters never edit sizeLocked or !editableByQuoter. */
   const canEditColumn = (col: CalcColumn) => {
     if (isCreator) return true;
     if (col.type === "size" && col.sizeLocked) return false;
-    return col.editableByQuoter;
+    if (!col.editableByQuoter) return false;
+    return true;
   };
 
   function addColumn() {
@@ -488,7 +523,16 @@ export function AdvancedQuotationCalculator({
       specs,
       meta: {
         calculator: "advanced-spreadsheet",
-        columns,
+        // Persist full column defs so creators can reopen and edit locked / non-editable fields
+        columns: columns.map((c) => ({
+          key: c.key,
+          label: c.label,
+          type: c.type,
+          formula: c.formula,
+          editableByQuoter: !!c.editableByQuoter,
+          unit: c.unit,
+          sizeLocked: !!c.sizeLocked,
+        })),
         rows: calculated.map((r) => ({
           cells: r.cells,
           formulas: r.formulas,
@@ -502,19 +546,22 @@ export function AdvancedQuotationCalculator({
     });
     setAdded(true);
     setSaved(true);
-    toast.success(`“${description}” saved to product catalogue.`);
+    toast.success(isEditing ? `“${description}” updated.` : `“${description}” saved to product catalogue.`);
   }
 
-  /** Columns the creator left unlocked for later editing (sizes, numbers, text). */
+  /**
+   * Fields shown on the edit card.
+   * Creators see all non-formula columns (including locked sizes) so they can set defaults.
+   * Quoters only see unlocked fields.
+   */
   const unlockedColumns = useMemo(
     () =>
-      columns.filter(
-        (c) =>
-          c.type !== "formula" &&
-          c.editableByQuoter &&
-          !(c.type === "size" && c.sizeLocked),
-      ),
-    [columns],
+      columns.filter((c) => {
+        if (c.type === "formula") return false;
+        if (isCreator) return true; // creator may edit locked data
+        return c.editableByQuoter && !(c.type === "size" && c.sizeLocked);
+      }),
+    [columns, isCreator],
   );
 
   const filteredProducts = (query: string) => {
@@ -760,8 +807,8 @@ export function AdvancedQuotationCalculator({
             Formula columns work like the Excel calculator: set a default formula on the column,
             then edit each row&apos;s formula in the grid (e.g. <code>=QTY*RATE</code>,{" "}
             <code>=IF(QTY&gt;10,RATE*0.9,RATE)</code>, <code>=SINDEG(ANGLE)*LENGTH</code>).
-            Supports + − × ÷, parentheses, <code>SIN/COS/TAN</code> (radians),{" "}
-            <code>SINDEG/COSDEG/TANDEG</code> (degrees), <code>IF(cond,then,else)</code>,{" "}
+            Supports + − × ÷, parentheses, <code>SIN/COS/TAN</code> (degrees),{" "}
+            <code>SINRAD/COSRAD/TANRAD</code> (radians), <code>IF(cond,then,else)</code>,{" "}
             <code>AND/OR/NOT</code>, <code>ABS/SQRT/MIN/MAX/ROUND</code>, <code>PI()</code>.
             Catalogue columns pick products for rate/description. Size columns can be locked by the
             product creator.
@@ -810,10 +857,13 @@ export function AdvancedQuotationCalculator({
         <div className="flex items-start gap-2">
           <Package className="mt-0.5 size-4 shrink-0 text-forest" />
           <div>
-            <p className="text-sm font-semibold">Unlocked fields (editable)</p>
+            <p className="text-sm font-semibold">
+              {isCreator ? "Product fields (creator can edit locked data)" : "Unlocked fields (editable)"}
+            </p>
             <p className="text-xs text-ink-muted">
-              These cells stay editable after the product is saved. Lock size columns in Columns if
-              they must not change.
+              {isCreator
+                ? "Set default values including locked sizes. Locked sizes stay fixed for quoters later."
+                : "These cells stay editable after the product is saved. Lock size columns in Columns if they must not change."}
             </p>
           </div>
         </div>
@@ -835,6 +885,9 @@ export function AdvancedQuotationCalculator({
                   <label className="mb-1 block text-xs text-ink-muted">
                     {col.label}
                     {col.unit ? ` (${col.unit})` : ""}
+                    {col.type === "size" && col.sizeLocked ? (
+                      <span className="ml-1 text-[10px] text-amber-700">locked for quoters</span>
+                    ) : null}
                   </label>
                   <Input
                     className="h-9"
@@ -880,7 +933,7 @@ export function AdvancedQuotationCalculator({
                   {col.type === "size" && col.sizeLocked ? (
                     <span
                       className="ml-1 text-[10px] text-amber-700"
-                      title="Locked by product creator"
+                      title="Locked — only the product creator can edit"
                     >
                       🔒
                     </span>
@@ -1044,7 +1097,7 @@ export function AdvancedQuotationCalculator({
             }
           >
             <Package className="mr-2 size-4" />
-            {saved ? "Save again to catalogue" : "Save product to catalogue"}
+            {saved ? "Save again" : isEditing ? "Save changes to product" : "Save product to catalogue"}
           </Button>
         )}
       </div>
