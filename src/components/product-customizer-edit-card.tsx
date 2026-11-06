@@ -17,6 +17,7 @@ import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { Product, ProductCustomizerConfig, SpecValues } from "@/lib/types";
 import { lookupRatesFromProduct } from "@/components/advanced-quotation-calculator";
 import { useLife } from "@/lib/store";
+import { applyCatalogueValues, resolveCatalogueLinks } from "@/lib/catalogue-sync";
 
 /* evaluateArithmetic imported from @/lib/formula-eval */
 
@@ -81,12 +82,22 @@ export function ProductCustomizerEditDialog({
     () => ({ ...(config?.cells || {}) }),
   );
 
-  // Reset local state when opening a different product
+  // Reset local state when opening; sync RATE from linked catalogue product’s live price
   useEffect(() => {
     if (open) {
-      setCells({ ...(config?.cells || {}) });
+      const next = { ...(config?.cells || {}) };
+      const catId = config?.catalogueProductId || product.reference_product_id;
+      if (catId) {
+        const src = state.products.find((p) => p.product_id === catId);
+        if (src && typeof src.selling_price === "number") {
+          const rateKey = config?.catalogueRateKey || "RATE";
+          next[rateKey] = src.selling_price;
+        }
+      }
+      // Catalogue columns show the synced price of their linked product, not the link
+      setCells(applyCatalogueValues(next, resolveCatalogueLinks(config, state.products), state.products));
     }
-  }, [open, product.product_id, config]);
+  }, [open, product.product_id, config, product.reference_product_id, state.products]);
 
   const unlocked = config?.unlocked || [];
   /** Only unlocked fields are shown: locked sizes and columns with Editable unchecked are hidden. */
@@ -229,7 +240,20 @@ export function ProductCustomizerEditDialog({
                             {u.label}
                             {u.unit ? ` (${u.unit})` : ""}
                           </label>
-                          {isDropdown ? (
+                          {u.type === "catalogue" ? (
+                            <div className="flex h-9 items-center justify-between rounded-md border border-ink/10 bg-leaf/30 px-3 text-sm">
+                              <span className="truncate text-ink-muted">
+                                {state.products.find(
+                                  (p) =>
+                                    p.product_id ===
+                                    resolveCatalogueLinks(config, state.products)[u.key],
+                                )?.name || "Catalogue item"}
+                              </span>
+                              <span className="font-medium tabular-nums">
+                                {money(Number(value ?? 0))}
+                              </span>
+                            </div>
+                          ) : isDropdown ? (
                             <Select
                               className="h-9"
                               value={value === null || value === undefined ? "" : String(value)}

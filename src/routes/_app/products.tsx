@@ -720,6 +720,10 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                     unlocked: meta.unlocked || [],
                     total: payload.cost_price,
                     rateTable,
+                    catalogueProductId: (payload.meta as { catalogueProductId?: string })
+                      .catalogueProductId,
+                    catalogueRateKey:
+                      (payload.meta as { catalogueRateKey?: string }).catalogueRateKey || "RATE",
                   },
                 });
                 if (productId) {
@@ -871,6 +875,8 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }>;
                   rateTable?: Array<Record<string, string | number | null>>;
                   unlocked?: Array<{ key: string; label: string; type: string; unit?: string }>;
+                  catalogueProductId?: string;
+                  catalogueRateKey?: string;
                 };
                 const primary = meta.rows?.[0];
                 const rateTable =
@@ -903,7 +909,11 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                     unlocked: meta.unlocked || [],
                     total: payload.cost_price,
                     rateTable,
+                    catalogueProductId: (meta as { catalogueProductId?: string }).catalogueProductId,
+                    catalogueRateKey:
+                      (meta as { catalogueRateKey?: string }).catalogueRateKey || "RATE",
                   },
+                  reference_product_id: (meta as { catalogueProductId?: string }).catalogueProductId,
                 });
                 setBuilderEditId(null);
               }}

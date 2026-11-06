@@ -403,6 +403,18 @@ export type ProductCustomizerConfig = {
    * Used by other products’ dropdowns to look up RATE, DENSITY, etc. by option value.
    */
   rateTable?: Array<Record<string, string | number | null>>;
+  /**
+   * Catalogue product linked as the rate/price source.
+   * When that product’s selling_price changes, this product’s RATE (and price) sync.
+   */
+  catalogueProductId?: string;
+  /** Cell key that receives the catalogue selling price (default RATE). */
+  catalogueRateKey?: string;
+  /**
+   * Catalogue columns: columnKey → linked product_id. The column's cell holds the product's
+   * synced selling price (a number); the id is kept here so the value can stay in sync.
+   */
+  catalogueLinks?: Record<string, string>;
 };
 
 /**

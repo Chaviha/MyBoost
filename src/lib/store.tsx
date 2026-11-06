@@ -20,6 +20,7 @@ import {
 } from "./roles";
 import { getCatalogueTemplate } from "./catalogue-templates";
 import { buildSeed } from "./seed";
+import { linksTo, syncCataloguePrice } from "./catalogue-sync";
 import { calculateQuotation } from "./pricing-engine";
 
 const LifeContext = createContext<any>(null);
@@ -861,6 +862,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
           const priceChanged =
             typeof patch.selling_price === "number" &&
             Number(patch.selling_price) !== Number(current.selling_price);
+          const newPrice = Number(patch.selling_price);
           const history = priceChanged
             ? [
                 {
@@ -868,7 +870,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
                   business_id: current.business_id,
                   product_id: productId,
                   old_price: Number(current.selling_price || 0),
-                  new_price: Number(patch.selling_price),
+                  new_price: newPrice,
                   unit: current.unit,
                   changed_by: prev.currentUserId,
                   reason: "Manual catalogue price update",
@@ -878,12 +880,104 @@ export function LifeProvider({ children }: { children: ReactNode }) {
                 ...(prev.price_history || []),
               ]
             : prev.price_history || [];
+
+          const isLinkedTo = (p: Product, sourceId: string): boolean => {
+            if (p.customizer?.catalogueProductId === sourceId) return true;
+            if (p.reference_product_id === sourceId) return true;
+            // Catalogue columns link by id (new) or hold the id in the cell (legacy)
+            return linksTo(p.customizer, sourceId);
+          };
+
+          const syncDependent = (p: Product): Product => {
+            if (!priceChanged || p.product_id === productId) return p;
+            if (!isLinkedTo(p, productId)) return p;
+
+            const rateKey =
+              p.customizer?.catalogueRateKey ||
+              p.customizer?.columns?.find((c) => c.key === "RATE")?.key ||
+              "RATE";
+            const base = { ...(p.customizer?.cells || {}) };
+            base[rateKey] = newPrice;
+            // Catalogue columns receive the synced price (never the product id)
+            const { cells, links: catalogueLinks } = p.customizer
+              ? syncCataloguePrice(p.customizer, base, productId, newPrice)
+              : { cells: base, links: {} as Record<string, string> };
+
+            const rateTable = (p.customizer?.rateTable || []).map((row) => ({
+              ...row,
+              [rateKey]: newPrice,
+            }));
+
+            // Prefer formula total when AMOUNT (or any formula) references RATE
+            let syncedTotal = Number(cells.QTY ?? 1) * newPrice;
+            const formulas = {
+              ...(p.customizer?.columns || []).reduce(
+                (acc, c) => {
+                  if (c.type === "formula" && c.formula) acc[c.key] = c.formula;
+                  return acc;
+                },
+                {} as Record<string, string>,
+              ),
+              ...(p.customizer?.formulas || {}),
+            };
+            const amountKey =
+              Object.keys(formulas).find((k) => k.toUpperCase() === "AMOUNT") ||
+              Object.keys(formulas)[0];
+            if (amountKey && formulas[amountKey]) {
+              try {
+                let expr = String(formulas[amountKey]).trim().replace(/^=/, "");
+                // Substitute known cell values (numbers)
+                const keys = Object.keys(cells).sort((a, b) => b.length - a.length);
+                for (const key of keys) {
+                  const num = Number(cells[key] ?? 0);
+                  expr = expr.replace(new RegExp(`\\b${key}\\b`, "gi"), String(Number.isFinite(num) ? num : 0));
+                }
+                // Very small safe eval: numbers and + - * / ( )
+                if (/^[\d\s.+\-*/()]+$/.test(expr)) {
+                  // eslint-disable-next-line no-new-func
+                  const val = Function(`"use strict"; return (${expr})`)();
+                  if (typeof val === "number" && Number.isFinite(val)) syncedTotal = val;
+                }
+              } catch {
+                /* keep qty * rate */
+              }
+            }
+
+            return {
+              ...p,
+              selling_price: syncedTotal,
+              cost_price: syncedTotal,
+              last_price_changed_at: new Date().toISOString(),
+              reference_product_id: p.reference_product_id || productId,
+              customizer: p.customizer
+                ? {
+                    ...p.customizer,
+                    catalogueProductId: p.customizer.catalogueProductId || productId,
+                    catalogueRateKey: rateKey,
+                    catalogueLinks,
+                    cells,
+                    rateTable: rateTable.length ? rateTable : p.customizer.rateTable,
+                    total: syncedTotal,
+                  }
+                : p.customizer,
+            };
+          };
+
+          const products = prev.products.map((p) => {
+            if (p.product_id === productId) {
+              return {
+                ...nextProduct,
+                last_price_changed_at: priceChanged
+                  ? new Date().toISOString()
+                  : p.last_price_changed_at,
+              };
+            }
+            return syncDependent(p);
+          });
+
           return {
             ...prev,
-            products: prev.products.map((p) => (p.product_id === productId ? {
-              ...nextProduct,
-              last_price_changed_at: priceChanged ? new Date().toISOString() : p.last_price_changed_at,
-            } : p)),
+            products,
             price_history: history,
           };
         });
@@ -954,10 +1048,50 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         setState((prev) => ({ ...prev, transport_rates: (prev.transport_rates || []).filter((x) => x.transport_rate_id !== id) }));
       },
       updateProductPricing: (productId: string, patch: Partial<Product>) => {
-        setState((prev) => ({
-          ...prev,
-          products: prev.products.map((p) => p.product_id === productId ? { ...p, ...patch } : p),
-        }));
+        // Same cascade path as updateProduct (catalogue-linked dependents)
+        setState((prev) => {
+          const current = prev.products.find((p) => p.product_id === productId);
+          if (!current) return prev;
+          const priceChanged =
+            typeof patch.selling_price === "number" &&
+            Number(patch.selling_price) !== Number(current.selling_price);
+          const newPrice = Number(patch.selling_price);
+          const nextProduct = { ...current, ...patch };
+
+          return {
+            ...prev,
+            products: prev.products.map((p) => {
+              if (p.product_id === productId) return nextProduct;
+              if (!priceChanged) return p;
+              const linked =
+                p.customizer?.catalogueProductId === productId ||
+                p.reference_product_id === productId ||
+                linksTo(p.customizer, productId);
+              if (!linked) return p;
+              const rateKey = p.customizer?.catalogueRateKey || "RATE";
+              const baseCells = { ...(p.customizer?.cells || {}), [rateKey]: newPrice };
+              const { cells, links: catalogueLinks } = p.customizer
+                ? syncCataloguePrice(p.customizer, baseCells, productId, newPrice)
+                : { cells: baseCells, links: {} as Record<string, string> };
+              const qty = Number(cells.QTY ?? 1) || 1;
+              const syncedTotal = qty * newPrice;
+              return {
+                ...p,
+                selling_price: syncedTotal,
+                cost_price: syncedTotal,
+                customizer: p.customizer
+                  ? {
+                      ...p.customizer,
+                      catalogueProductId: p.customizer.catalogueProductId || productId,
+                      catalogueLinks,
+                      cells,
+                      total: syncedTotal,
+                    }
+                  : p.customizer,
+              };
+            }),
+          };
+        });
       },
       addBusiness: async (form) => {
         const business_id = uid("BUS");
@@ -1545,8 +1679,13 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         family?: string;
         itemKind?: "product" | "service";
         customizer?: import("./types").ProductCustomizerConfig;
+        reference_product_id?: string;
       }) => {
         const product_id = uid("PRD");
+        const refId =
+          form.reference_product_id ||
+          form.customizer?.catalogueProductId ||
+          undefined;
         setState((prev) => ({
           ...prev,
           products: [
@@ -1570,10 +1709,17 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               specs: form.specs || {},
               image_url: "",
               gallery: [],
-              pricing_method: "manual",
+              pricing_method: refId ? "reference" : "manual",
               price_factor: 1,
               pricing_unit: form.unit || "unit",
-              customizer: form.customizer,
+              reference_product_id: refId,
+              customizer: form.customizer
+                ? {
+                    ...form.customizer,
+                    catalogueProductId:
+                      form.customizer.catalogueProductId || refId,
+                  }
+                : form.customizer,
             },
           ],
         }));

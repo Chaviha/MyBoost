@@ -10,6 +10,7 @@ import { money, uid } from "@/lib/format";
 import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { Product, ProductCustomizerConfig, QuoteLineItem } from "@/lib/types";
 import { lookupRatesFromProduct } from "@/components/advanced-quotation-calculator";
+import { applyCatalogueValues, resolveCatalogueLinks } from "@/lib/catalogue-sync";
 
 /* evaluateArithmetic imported from @/lib/formula-eval */
 
@@ -115,7 +116,18 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
 
   function pickProduct(p: Product) {
     setSelectedId(p.product_id);
-    setCells({ ...(p.customizer?.cells || {}) });
+    const nextCells = { ...(p.customizer?.cells || {}) };
+    // Live sync: if linked to a catalogue product, use its current selling_price as RATE
+    const catId = p.customizer?.catalogueProductId || p.reference_product_id;
+    if (catId) {
+      const src = products.find((x) => x.product_id === catId);
+      if (src && typeof src.selling_price === "number") {
+        const rateKey = p.customizer?.catalogueRateKey || "RATE";
+        nextCells[rateKey] = src.selling_price;
+      }
+    }
+    // Catalogue columns carry the linked product's synced price, not its id
+    setCells(applyCatalogueValues(nextCells, resolveCatalogueLinks(p.customizer, products), products));
     setQty("1");
   }
 
@@ -344,7 +356,18 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
                         {u.label}
                         {u.unit ? ` (${u.unit})` : ""}
                       </label>
-                      {isDropdown ? (
+                      {u.type === "catalogue" ? (
+                        <div className="flex h-9 items-center justify-between rounded-md border border-ink/10 bg-leaf/30 px-3 text-sm">
+                          <span className="truncate text-ink-muted">
+                            {products.find(
+                              (x) =>
+                                x.product_id ===
+                                resolveCatalogueLinks(config, products)[u.key],
+                            )?.name || "Catalogue item"}
+                          </span>
+                          <span className="font-medium tabular-nums">{money(Number(value ?? 0))}</span>
+                        </div>
+                      ) : isDropdown ? (
                         <Select
                           className="h-9"
                           value={value === null || value === undefined ? "" : String(value)}

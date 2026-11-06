@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import {
   Plus,
   Calculator,
@@ -24,6 +24,7 @@ import { money, uid } from "@/lib/format";
 import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { MarketplaceProduct, QuoteLineItem, Product } from "@/lib/types";
 import { useLife } from "@/lib/store";
+import { applyCatalogueValues } from "@/lib/catalogue-sync";
 
 /** Column data types the product creator / quoter can choose. */
 export type ColumnType = "text" | "number" | "catalogue" | "formula" | "dropdown";
@@ -159,6 +160,8 @@ export type CalcRow = {
   formulas?: Record<string, string>;
   /** When a catalogue column is used, store the matched product for costing. */
   catalogueProductId?: string;
+  /** Catalogue column key → linked product_id. The cell itself holds the synced price, not the id. */
+  catalogueLinks?: Record<string, string>;
 };
 
 function slugKey(label: string, existing: string[]): string {
@@ -268,12 +271,36 @@ function seedFromProduct(product?: Product): { columns: CalcColumn[]; row: CalcR
     lookupFillKeys: (c as { lookupFillKeys?: string[] }).lookupFillKeys,
   }));
   const base = newRow(columns);
+  let catalogueProductId = saved.catalogueProductId || product?.reference_product_id;
+  if (!catalogueProductId) {
+    for (const c of saved.columns || []) {
+      if (c.type !== "catalogue") continue;
+      const v = String(saved.cells?.[c.key] || "");
+      if (v) {
+        catalogueProductId = v;
+        break;
+      }
+    }
+  }
+  // Catalogue columns: keep the id link separately; the cell holds the synced price.
+  const catalogueLinks: Record<string, string> = { ...(saved.catalogueLinks || {}) };
+  const seededCells = { ...base.cells, ...(saved.cells || {}) };
+  for (const c of saved.columns || []) {
+    if (c.type !== "catalogue") continue;
+    const raw = String(seededCells[c.key] ?? "");
+    if (!catalogueLinks[c.key] && raw && Number.isNaN(Number(raw))) {
+      catalogueLinks[c.key] = raw; // legacy save: cell held the product id
+    }
+    if (catalogueLinks[c.key] && typeof seededCells[c.key] !== "number") seededCells[c.key] = 0;
+  }
   return {
     columns,
     row: {
       ...base,
-      cells: { ...base.cells, ...(saved.cells || {}) },
+      cells: seededCells,
       formulas: { ...(base.formulas || {}), ...(saved.formulas || {}) },
+      catalogueProductId,
+      catalogueLinks,
     },
   };
 }
@@ -434,6 +461,46 @@ export function AdvancedQuotationCalculator({
     return { description, unit, specs, lines, total };
   }, [calculated, columns, productName, total]);
 
+  /** Keep RATE in sync with the linked catalogue product’s current selling_price. */
+  useEffect(() => {
+    setRows((current) => {
+      let changed = false;
+      const next = current.map((r0) => {
+        let r = r0;
+        // Catalogue columns: refresh each linked cell with the product's current price
+        let row = r;
+        if (r.catalogueLinks && Object.keys(r.catalogueLinks).length) {
+          const synced = applyCatalogueValues(
+            r.cells,
+            r.catalogueLinks,
+            catalogueProducts as Array<Pick<Product, "product_id" | "selling_price">>,
+          );
+          if (Object.keys(r.catalogueLinks).some((k) => synced[k] !== r.cells[k])) {
+            changed = true;
+            row = { ...r, cells: synced };
+          }
+        }
+        if (!row.catalogueProductId) return row;
+        r = row;
+        const src = catalogueProducts.find(
+          (p) =>
+            ("product_id" in p && p.product_id === r.catalogueProductId) ||
+            (p as { product_id?: string }).product_id === r.catalogueProductId,
+        );
+        if (!src || typeof (src as Product).selling_price !== "number") return r;
+        const rateKey =
+          columns.find((c) => c.key === "RATE")?.key ||
+          columns.find((c) => c.type === "number" && c.key !== "QTY")?.key ||
+          "RATE";
+        const live = Number((src as Product).selling_price);
+        if (Number(r.cells[rateKey]) === live) return r;
+        changed = true;
+        return { ...r, cells: { ...r.cells, [rateKey]: live } };
+      });
+      return changed ? next : current;
+    });
+  }, [catalogueProducts, columns]);
+
   const updateCell = useCallback(
     (rowId: string, key: string, value: CalcCellValue) => {
       setRows((current) =>
@@ -575,7 +642,11 @@ export function AdvancedQuotationCalculator({
     setColumns((c) => c.map((col) => (col.id === id ? { ...col, ...patch } : col)));
   }
 
-  function pickCatalogue(rowId: string, product: MarketplaceProduct | Product) {
+  function pickCatalogue(rowId: string, colKey: string, product: MarketplaceProduct | Product) {
+    const productId =
+      "product_id" in product && product.product_id
+        ? String(product.product_id)
+        : undefined;
     const descKey =
       columns.find((c) => c.key === "DESCRIPTION")?.key ||
       columns.find((c) => c.type === "text")?.key;
@@ -589,8 +660,14 @@ export function AdvancedQuotationCalculator({
         if (r.id !== rowId) return r;
         const cells = { ...r.cells };
         if (descKey) cells[descKey] = product.name;
-        if (rateKey) cells[rateKey] = product.selling_price;
+        if (rateKey) cells[rateKey] = Number(product.selling_price) || 0;
         if (unitKey) cells[unitKey] = product.unit || "item";
+        // The catalogue column gets the product's synced PRICE (not its id/link);
+        // the id is kept in catalogueLinks so the value follows future price changes.
+        const links = { ...(r.catalogueLinks || {}) };
+        cells[colKey] = Number(product.selling_price) || 0;
+        if (productId) links[colKey] = productId;
+        else delete links[colKey];
         for (const col of columns) {
           if (col.type === "dropdown" && product.specs) {
             const match = Object.entries(product.specs).find(
@@ -604,13 +681,18 @@ export function AdvancedQuotationCalculator({
         return {
           ...r,
           cells,
-          catalogueProductId: "product_id" in product ? product.product_id : undefined,
+          catalogueProductId: productId,
+          catalogueLinks: links,
         };
       }),
     );
-    setCatalogueSearch((s) => ({ ...s, [rowId]: "" }));
+    setCatalogueSearch((s) => ({ ...s, [rowId + colKey]: "" }));
     setAdded(false);
-    toast.success(`Linked “${product.name}”`);
+    toast.success(
+      productId
+        ? `Linked “${product.name}” — price will stay in sync with the catalogue`
+        : `Linked “${product.name}”`,
+    );
   }
 
   function transferToQuote() {
@@ -729,11 +811,29 @@ export function AdvancedQuotationCalculator({
           cells: r.cells,
           formulas: r.formulas,
           amount: r.amount,
+          catalogueProductId: r.catalogueProductId,
+          catalogueLinks: r.catalogueLinks,
         })),
         total,
         unlocked,
         sku: localSku,
         category: localCategory,
+        // Primary row’s catalogue link → keep this product’s RATE in sync when that catalogue price changes
+        catalogueProductId: (() => {
+          if (primary.catalogueProductId) return primary.catalogueProductId;
+          // Fallback: catalogue column cell may hold a product_id
+          for (const col of columns) {
+            if (col.type !== "catalogue") continue;
+            const v = String(primary.cells[col.key] || "");
+            if (v && catalogueProducts.some((p) => p.product_id === v)) return v;
+          }
+          return undefined;
+        })(),
+        catalogueLinks: primary.catalogueLinks,
+        catalogueRateKey:
+          columns.find((c) => c.key === "RATE")?.key ||
+          columns.find((c) => c.type === "number" && c.key !== "QTY")?.key ||
+          "RATE",
       },
     });
     setAdded(true);
@@ -1412,8 +1512,12 @@ export function AdvancedQuotationCalculator({
                   }
 
                   if (col.type === "catalogue") {
-                    const search = catalogueSearch[row.id] ?? "";
+                    const search = catalogueSearch[row.id + col.key] ?? "";
                     const matches = filteredProducts(search);
+                    const linkedId = row.catalogueLinks?.[col.key];
+                    const linked = linkedId
+                      ? catalogueProducts.find((p) => (p as Product).product_id === linkedId)
+                      : undefined;
                     return (
                       <td
                         key={col.id}
@@ -1422,13 +1526,19 @@ export function AdvancedQuotationCalculator({
                         <Input
                           className="h-8"
                           placeholder="Search catalogue…"
-                          value={search || String(value ?? "")}
+                          value={search || linked?.name || ""}
                           disabled={!editable}
                           onChange={(e) => {
-                            setCatalogueSearch((s) => ({ ...s, [row.id]: e.target.value }));
-                            updateCell(row.id, col.key, e.target.value);
+                            // Typing only searches; the cell value comes from the picked product.
+                            setCatalogueSearch((s) => ({ ...s, [row.id + col.key]: e.target.value }));
                           }}
                         />
+                        <p className="px-1 pt-0.5 text-right text-sm font-medium tabular-nums">
+                          {linked ? money(Number(value ?? 0)) : "—"}
+                          {linked ? (
+                            <span className="ml-1 text-xs font-normal text-ink-muted">synced</span>
+                          ) : null}
+                        </p>
                         {editable && search.trim() && matches.length > 0 && (
                           <ul className="absolute z-20 mt-0.5 max-h-40 w-64 overflow-auto rounded-md border border-ink/15 bg-white shadow-lg text-xs">
                             {matches.map((p) => (
@@ -1436,7 +1546,9 @@ export function AdvancedQuotationCalculator({
                                 <button
                                   type="button"
                                   className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-leaf/40"
-                                  onClick={() => pickCatalogue(row.id, p)}
+                                  onClick={() => {
+                                    pickCatalogue(row.id, col.key, p);
+                                  }}
                                 >
                                   <span className="truncate">{p.name}</span>
                                   <span className="shrink-0 tabular-nums text-ink-muted">
