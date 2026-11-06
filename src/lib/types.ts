@@ -360,11 +360,23 @@ export type Product = {
 export type ProductCustomizerColumn = {
   key: string;
   label: string;
-  type: "text" | "number" | "catalogue" | "formula" | "size";
+  type: "text" | "number" | "catalogue" | "formula" | "dropdown";
   formula?: string;
   editableByQuoter: boolean;
   unit?: string;
+  /** @deprecated was used for size columns; kept for older saved products */
   sizeLocked?: boolean;
+  /** Choices for dropdown columns (text values set by the product creator). */
+  options?: string[];
+  /**
+   * For dropdown columns: pull RATE / DENSITY (or other fields) from another product’s rate table
+   * when the user picks a value (e.g. MS, GI, Bronze, AL).
+   */
+  lookupProductId?: string;
+  /** Column key on the source product used to match the selected dropdown value (e.g. MATERIAL). */
+  lookupMatchKey?: string;
+  /** Column keys to copy from the matched source row into this product’s cells (e.g. RATE, DENSITY). */
+  lookupFillKeys?: string[];
 };
 
 export type ProductCustomizerConfig = {
@@ -375,8 +387,22 @@ export type ProductCustomizerConfig = {
   /** Per-column formulas (may override column defaults). */
   formulas?: Record<string, string>;
   /** Fields the creator left unlocked for later editing. */
-  unlocked: Array<{ key: string; label: string; type: string; unit?: string }>;
+  unlocked: Array<{
+    key: string;
+    label: string;
+    type: string;
+    unit?: string;
+    options?: string[];
+    lookupProductId?: string;
+    lookupMatchKey?: string;
+    lookupFillKeys?: string[];
+  }>;
   total?: number;
+  /**
+   * All material / option rows from the spreadsheet builder.
+   * Used by other products’ dropdowns to look up RATE, DENSITY, etc. by option value.
+   */
+  rateTable?: Array<Record<string, string | number | null>>;
 };
 
 /**

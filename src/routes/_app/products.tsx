@@ -677,8 +677,15 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   unlocked?: Array<{ key: string; label: string; type: string; unit?: string }>;
                 };
                 const cat = businessCategories.find((c) => c.category_id === activeCategoryId);
-                const rows = (payload.meta as { rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }> }).rows;
+                const rows = (payload.meta as {
+                  rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }>;
+                  rateTable?: Array<Record<string, string | number | null>>;
+                }).rows;
                 const primary = rows?.[0];
+                const rateTable =
+                  (payload.meta as { rateTable?: Array<Record<string, string | number | null>> }).rateTable ||
+                  rows?.map((r) => r.cells || {}) ||
+                  [];
                 const rawCols = (payload.meta as { columns?: import("@/lib/types").ProductCustomizerColumn[] }).columns || [];
                 const columns = rawCols.map((c) => ({
                   key: c.key,
@@ -688,6 +695,10 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   editableByQuoter: c.editableByQuoter !== false,
                   unit: c.unit,
                   sizeLocked: !!c.sizeLocked,
+                  options: c.options,
+                  lookupProductId: c.lookupProductId,
+                  lookupMatchKey: c.lookupMatchKey,
+                  lookupFillKeys: c.lookupFillKeys,
                 }));
                 const productId = addProduct({
                   name: payload.description,
@@ -708,6 +719,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                     formulas: primary?.formulas,
                     unlocked: meta.unlocked || [],
                     total: payload.cost_price,
+                    rateTable,
                   },
                 });
                 if (productId) {
@@ -857,9 +869,12 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   category?: string;
                   columns?: import("@/lib/types").ProductCustomizerColumn[];
                   rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }>;
+                  rateTable?: Array<Record<string, string | number | null>>;
                   unlocked?: Array<{ key: string; label: string; type: string; unit?: string }>;
                 };
                 const primary = meta.rows?.[0];
+                const rateTable =
+                  meta.rateTable || meta.rows?.map((r) => r.cells || {}) || [];
                 updateProduct(builderEditProduct.product_id, {
                   name: payload.description,
                   unit: payload.unit || builderEditProduct.unit,
@@ -878,11 +893,16 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                       editableByQuoter: c.editableByQuoter !== false,
                       unit: c.unit,
                       sizeLocked: !!c.sizeLocked,
+                      options: c.options,
+                      lookupProductId: c.lookupProductId,
+                      lookupMatchKey: c.lookupMatchKey,
+                      lookupFillKeys: c.lookupFillKeys,
                     })),
                     cells: (primary?.cells || {}) as Record<string, string | number | null>,
                     formulas: primary?.formulas,
                     unlocked: meta.unlocked || [],
                     total: payload.cost_price,
+                    rateTable,
                   },
                 });
                 setBuilderEditId(null);

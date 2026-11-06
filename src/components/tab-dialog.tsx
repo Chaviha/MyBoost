@@ -16,11 +16,22 @@ import { Select } from "@/components/ui/select";
 import { formatDateTime, money, uid } from "@/lib/format";
 import type { Customer, Invoice, LedgerEntry, PaymentLineItem, Product } from "@/lib/types";
 import {
+  downloadAccountStatement,
   downloadPaymentReceiptHtml,
+  filterLedgerUpToDate,
+  printAccountStatement,
   printPaymentReceipt,
 } from "@/lib/payment-invoice-export";
 import { useLife } from "@/lib/store";
 import { cn } from "@/lib/utils";
+
+function todayYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 export function LedgerList({
   entries,
@@ -41,11 +52,86 @@ export function LedgerList({
     selectedBusiness,
   } = useLife();
 
+  const [statementAsOf, setStatementAsOf] = useState(todayYmd);
+
+  const statementBusiness = {
+    business_name: selectedBusiness?.business_name || "Business",
+    phone: selectedBusiness?.phone,
+    email: selectedBusiness?.email,
+    region: selectedBusiness?.region,
+  };
+
+  function buildStatementDoc() {
+    const filtered = filterLedgerUpToDate(entries, statementAsOf);
+    const totalCharges = filtered
+      .filter((e) => e.type === "charge" && e.status !== "reversed")
+      .reduce((s, e) => s + Number(e.amount || 0), 0);
+    const totalPayments = filtered
+      .filter((e) => e.type === "payment" && e.status !== "reversed")
+      .reduce((s, e) => s + Number(e.amount || 0), 0);
+    return {
+      customer_name: customer?.name || "Customer",
+      customer_phone: customer?.phone,
+      customer_id: customer?.customer_id,
+      as_of_date: statementAsOf,
+      closing_balance: totalCharges - totalPayments,
+      entries: filtered,
+    };
+  }
+
+  function handleDownloadStatement() {
+    if (!statementAsOf) {
+      toast.error("Choose a date for the statement.");
+      return;
+    }
+    downloadAccountStatement(buildStatementDoc(), statementBusiness);
+    toast.success(`Statement downloaded (as of ${statementAsOf}).`);
+  }
+
+  function handlePrintStatement() {
+    if (!statementAsOf) {
+      toast.error("Choose a date for the statement.");
+      return;
+    }
+    printAccountStatement(buildStatementDoc(), statementBusiness);
+  }
+
+  const statementBar = (
+    <div className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-ink/10 bg-canvas/50 p-3">
+      <Field label="Statement as of" className="mb-0 min-w-[160px]">
+        <Input
+          type="date"
+          value={statementAsOf}
+          max={todayYmd()}
+          onChange={(e) => setStatementAsOf(e.target.value)}
+        />
+      </Field>
+      <Button type="button" variant="secondary" size="sm" onClick={handleDownloadStatement}>
+        <Download className="mr-1.5 size-4" />
+        Download statement
+      </Button>
+      <Button type="button" variant="ghost" size="sm" onClick={handlePrintStatement}>
+        <Printer className="mr-1.5 size-4" />
+        Print statement
+      </Button>
+      <p className="w-full text-xs text-ink-muted">
+        Includes all charges and payments on or before the selected date.
+      </p>
+    </div>
+  );
+
   if (!entries.length) {
-    return <p className="py-4 text-sm text-ink-muted">No movements yet on this tab.</p>;
+    return (
+      <div>
+        {statementBar}
+        <p className="py-4 text-sm text-ink-muted">No movements yet on this tab.</p>
+      </div>
+    );
   }
 
   return (
+    <div>
+      {statementBar}
     <ul className="flex flex-col">
       {entries.map((entry) => {
         const who =
@@ -186,6 +272,7 @@ export function LedgerList({
         );
       })}
     </ul>
+    </div>
   );
 }
 

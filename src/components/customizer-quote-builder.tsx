@@ -4,10 +4,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Field } from "@/components/field";
 import { money, uid } from "@/lib/format";
 import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { Product, ProductCustomizerConfig, QuoteLineItem } from "@/lib/types";
+import { lookupRatesFromProduct } from "@/components/advanced-quotation-calculator";
 
 /* evaluateArithmetic imported from @/lib/formula-eval */
 
@@ -119,12 +121,26 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
 
   const config = selected?.customizer;
   // Quoters only: never include sizeLocked columns even if mis-listed in unlocked
-  const unlocked = (config?.unlocked || []).filter((u) => {
-    const col = config?.columns?.find((c) => c.key === u.key);
-    if (col?.type === "size" && col.sizeLocked) return false;
-    if (col && col.editableByQuoter === false) return false;
-    return true;
-  });
+  const unlocked = (config?.unlocked || [])
+    .filter((u) => {
+      const col = config?.columns?.find((c) => c.key === u.key);
+      const colType = col?.type === "size" ? "dropdown" : col?.type;
+      if (colType === "dropdown" && col?.sizeLocked) return false;
+      if (col && col.editableByQuoter === false) return false;
+      return true;
+    })
+    .map((u) => {
+      const col = config?.columns?.find((c) => c.key === u.key);
+      const type = u.type === "size" ? "dropdown" : u.type;
+      return {
+        ...u,
+        type,
+        options: (u.options ?? col?.options)?.map(String),
+        lookupProductId: (u as { lookupProductId?: string }).lookupProductId ?? col?.lookupProductId,
+        lookupMatchKey: (u as { lookupMatchKey?: string }).lookupMatchKey ?? col?.lookupMatchKey,
+        lookupFillKeys: (u as { lookupFillKeys?: string[] }).lookupFillKeys ?? col?.lookupFillKeys,
+      };
+    });
 
   const computed = useMemo(() => {
     if (!config) return { cells, total: 0, error: undefined as string | undefined };
@@ -132,7 +148,29 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
   }, [cells, config]);
 
   function updateField(key: string, value: string | number | null) {
-    setCells((c) => ({ ...c, [key]: value }));
+    setCells((c) => {
+      const next: Record<string, string | number | null> = { ...c, [key]: value };
+      const field = unlocked.find((u) => u.key === key);
+      const col = config?.columns?.find((x) => x.key === key);
+      const lookupProductId = field?.lookupProductId ?? col?.lookupProductId;
+      if ((field?.type === "dropdown" || col?.type === "dropdown") && lookupProductId && value) {
+        const source = products.find((p) => p.product_id === lookupProductId);
+        const fillKeys =
+          field?.lookupFillKeys?.length || col?.lookupFillKeys?.length
+            ? field?.lookupFillKeys || col?.lookupFillKeys || []
+            : ["RATE", "DENSITY"];
+        const matchKey = field?.lookupMatchKey || col?.lookupMatchKey || key;
+        const filled = lookupRatesFromProduct(source, String(value), matchKey, fillKeys);
+        for (const [srcKey, srcVal] of Object.entries(filled)) {
+          const target =
+            config?.columns?.find((x) => x.key.toUpperCase() === srcKey.toUpperCase())?.key ||
+            unlocked.find((x) => x.key.toUpperCase() === srcKey.toUpperCase())?.key ||
+            srcKey;
+          next[target] = srcVal;
+        }
+      }
+      return next;
+    });
   }
 
   function addToQuote() {
@@ -296,7 +334,9 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
             ) : (
               <div className="grid gap-2 sm:grid-cols-2">
                 {unlocked.map((u) => {
-                  const isNumeric = u.type === "number" || u.type === "size";
+                  const isDropdown = u.type === "dropdown" || u.type === "size";
+                  const dropdownOptions = (u.options || []).map(String);
+                  const isNumeric = u.type === "number";
                   const value = cells[u.key];
                   return (
                     <div key={u.key} className="rounded-md border border-ink/10 bg-paper px-3 py-2">
@@ -304,21 +344,36 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
                         {u.label}
                         {u.unit ? ` (${u.unit})` : ""}
                       </label>
-                      <Input
-                        className="h-9"
-                        type={isNumeric ? "number" : "text"}
-                        min={isNumeric ? 0 : undefined}
-                        step={u.type === "size" ? "any" : undefined}
-                        value={value === null || value === undefined ? "" : String(value)}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          if (isNumeric) {
-                            updateField(u.key, raw === "" ? 0 : Number(raw));
-                          } else {
-                            updateField(u.key, raw);
-                          }
-                        }}
-                      />
+                      {isDropdown ? (
+                        <Select
+                          className="h-9"
+                          value={value === null || value === undefined ? "" : String(value)}
+                          onChange={(e) => updateField(u.key, e.target.value)}
+                        >
+                          <option value="">Select…</option>
+                          {dropdownOptions.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                              {u.unit ? ` ${u.unit}` : ""}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <Input
+                          className="h-9"
+                          type={isNumeric ? "number" : "text"}
+                          min={isNumeric ? 0 : undefined}
+                          value={value === null || value === undefined ? "" : String(value)}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            if (isNumeric) {
+                              updateField(u.key, raw === "" ? 0 : Number(raw));
+                            } else {
+                              updateField(u.key, raw);
+                            }
+                          }}
+                        />
+                      )}
                     </div>
                   );
                 })}

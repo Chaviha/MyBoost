@@ -23,9 +23,10 @@ import { Field } from "@/components/field";
 import { money, uid } from "@/lib/format";
 import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { MarketplaceProduct, QuoteLineItem, Product } from "@/lib/types";
+import { useLife } from "@/lib/store";
 
 /** Column data types the product creator / quoter can choose. */
-export type ColumnType = "text" | "number" | "catalogue" | "formula" | "size";
+export type ColumnType = "text" | "number" | "catalogue" | "formula" | "dropdown";
 
 export type CalcColumn = {
   id: string;
@@ -38,9 +39,116 @@ export type CalcColumn = {
   editableByQuoter: boolean;
   /** Optional unit shown next to the header (mm, kg, pcs…). */
   unit?: string;
-  /** For size columns: whether this size is locked by the product creator. */
+  /** When true, quoter cannot change this column (mainly for locked dropdowns). */
   sizeLocked?: boolean;
+  /** Choices for dropdown columns — text values created by the product creator. */
+  options?: string[];
+  /** Source product whose rate table supplies RATE/DENSITY when this dropdown changes. */
+  lookupProductId?: string;
+  /** Column key on the source product to match (e.g. MATERIAL). Defaults to this column’s key. */
+  lookupMatchKey?: string;
+  /** Keys to copy from the matched source row (e.g. RATE, DENSITY). */
+  lookupFillKeys?: string[];
 };
+
+/** Normalize legacy "size" type to "dropdown" and coerce option values to strings. */
+function normalizeColumnType(type: string): ColumnType {
+  if (type === "size") return "dropdown";
+  if (type === "text" || type === "number" || type === "catalogue" || type === "formula" || type === "dropdown") {
+    return type;
+  }
+  return "text";
+}
+
+function normalizeOptions(options?: (string | number)[] | null): string[] | undefined {
+  if (!options?.length) return undefined;
+  return options.map((o) => String(o));
+}
+
+/**
+ * Look up RATE / DENSITY (or other fields) from a source product’s rate table
+ * by matching the selected dropdown value (e.g. MS → rate row for MS).
+ */
+export function lookupRatesFromProduct(
+  sourceProduct:
+    | {
+        customizer?: {
+          rateTable?: Array<Record<string, string | number | null>>;
+          cells?: Record<string, string | number | null>;
+          columns?: Array<{ key: string; type?: string; options?: string[] }>;
+        } | null;
+        specs?: Record<string, string | number>;
+        selling_price?: number;
+      }
+    | null
+    | undefined,
+  selectedValue: string,
+  matchKey: string,
+  fillKeys: string[],
+): Record<string, string | number | null> {
+  const result: Record<string, string | number | null> = {};
+  if (!sourceProduct || !selectedValue || !fillKeys.length) return result;
+
+  const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+  const want = norm(selectedValue);
+
+  const table =
+    sourceProduct.customizer?.rateTable?.length
+      ? sourceProduct.customizer.rateTable
+      : sourceProduct.customizer?.cells
+        ? [sourceProduct.customizer.cells]
+        : [];
+
+  const matchKeys = [
+    matchKey,
+    matchKey.toUpperCase(),
+    matchKey.toLowerCase(),
+    "MATERIAL",
+    "Material",
+    "material",
+    "OPTION",
+    "Option",
+    "TYPE",
+    "Type",
+  ].filter(Boolean);
+
+  const row = table.find((r) =>
+    matchKeys.some((k) => r[k] !== undefined && r[k] !== null && norm(r[k]) === want),
+  );
+
+  if (row) {
+    for (const key of fillKeys) {
+      const variants = [key, key.toUpperCase(), key.toLowerCase()];
+      for (const v of variants) {
+        if (row[v] !== undefined && row[v] !== null && row[v] !== "") {
+          result[key] = row[v];
+          break;
+        }
+      }
+    }
+    return result;
+  }
+
+  // Fallback: specs on the source product (e.g. density_ms)
+  const specs = sourceProduct.specs || {};
+  for (const key of fillKeys) {
+    const candidates = [
+      specs[`${key}_${selectedValue}`],
+      specs[`${key.toLowerCase()}_${want}`],
+      specs[`${want}_${key}`],
+      specs[`${want}_${key.toLowerCase()}`],
+      specs[key],
+      specs[key.toLowerCase()],
+    ];
+    for (const c of candidates) {
+      if (c !== undefined && c !== null && c !== "") {
+        result[key] = c;
+        break;
+      }
+    }
+  }
+  return result;
+}
 
 export type CalcCellValue = string | number | null;
 
@@ -98,11 +206,11 @@ function defaultColumns(): CalcColumn[] {
     },
     {
       id: uid("COL"),
-      key: "SIZE",
-      label: "Size",
-      type: "size",
+      key: "OPTION",
+      label: "Option",
+      type: "dropdown",
       editableByQuoter: true,
-      unit: "mm",
+      options: [],
     },
     {
       id: uid("COL"),
@@ -149,11 +257,15 @@ function seedFromProduct(product?: Product): { columns: CalcColumn[]; row: CalcR
     id: uid("COL"),
     key: c.key,
     label: c.label || c.key,
-    type: c.type,
+    type: normalizeColumnType(c.type),
     formula: c.formula,
     editableByQuoter: c.editableByQuoter !== false,
     unit: c.unit,
     sizeLocked: !!c.sizeLocked,
+    options: normalizeOptions(c.options as (string | number)[] | undefined),
+    lookupProductId: (c as { lookupProductId?: string }).lookupProductId,
+    lookupMatchKey: (c as { lookupMatchKey?: string }).lookupMatchKey,
+    lookupFillKeys: (c as { lookupFillKeys?: string[] }).lookupFillKeys,
   }));
   const base = newRow(columns);
   return {
@@ -170,7 +282,7 @@ function newRow(columns: CalcColumn[]): CalcRow {
   const cells: Record<string, CalcCellValue> = {};
   const formulas: Record<string, string> = {};
   for (const col of columns) {
-    if (col.type === "number" || col.type === "size") cells[col.key] = col.key === "QTY" ? 1 : 0;
+    if (col.type === "number") cells[col.key] = col.key === "QTY" ? 1 : 0;
     else if (col.type === "formula") {
       cells[col.key] = null;
       formulas[col.key] = col.formula || "=0";
@@ -210,10 +322,34 @@ export function AdvancedQuotationCalculator({
 }: Props) {
   const isCreator = mode === "product_creator";
   const isEditing = Boolean(initialProduct);
+  const { state, selectedBusiness } = useLife();
+  /** Catalogue products for rate-lookup dropdown (props + current business). */
+  const catalogueProducts = useMemo(() => {
+    const fromProps = products || [];
+    const bid = selectedBusiness?.business_id;
+    const fromStore = (state.products || []).filter(
+      (p) => !bid || p.business_id === bid,
+    );
+    const map = new Map<string, MarketplaceProduct | Product>();
+    for (const p of [...fromStore, ...fromProps]) {
+      const id =
+        "product_id" in p && p.product_id
+          ? String(p.product_id)
+          : String((p as { product_id?: string }).product_id || "");
+      if (id) map.set(id, p);
+    }
+    // Prefer products that already have a rate table when sorting
+    return [...map.values()].sort((a, b) =>
+      String(a.name || "").localeCompare(String(b.name || "")),
+    );
+  }, [products, state.products, selectedBusiness?.business_id]);
   const [seed] = useState(() => seedFromProduct(initialProduct));
   const [columns, setColumns] = useState<CalcColumn[]>(seed.columns);
   const [rows, setRows] = useState<CalcRow[]>(() => [seed.row]);
-  const [showColumnEditor, setShowColumnEditor] = useState(false);
+  const [showColumnEditor, setShowColumnEditor] = useState(true); // open columns by default so dropdown product link is visible
+  /** Text for the next dropdown choice being typed (one at a time — no commas needed). */
+  const [newOptionText, setNewOptionText] = useState<Record<string, string>>({});
+  const [fillKeysDraft, setFillKeysDraft] = useState<Record<string, string>>({});
   const [newColLabel, setNewColLabel] = useState("");
   const [newColType, setNewColType] = useState<ColumnType>("number");
   const [newColFormula, setNewColFormula] = useState("=QTY*RATE");
@@ -298,12 +434,54 @@ export function AdvancedQuotationCalculator({
     return { description, unit, specs, lines, total };
   }, [calculated, columns, productName, total]);
 
-  const updateCell = useCallback((rowId: string, key: string, value: CalcCellValue) => {
-    setRows((current) =>
-      current.map((r) => (r.id === rowId ? { ...r, cells: { ...r.cells, [key]: value } } : r)),
-    );
-    setAdded(false);
-  }, []);
+  const updateCell = useCallback(
+    (rowId: string, key: string, value: CalcCellValue) => {
+      setRows((current) =>
+        current.map((r) => {
+          if (r.id !== rowId) return r;
+          let cells: Record<string, CalcCellValue> = { ...r.cells, [key]: value };
+          const col = columns.find((c) => c.key === key);
+          if (col?.type === "dropdown" && col.lookupProductId && value) {
+            const source = catalogueProducts.find(
+              (p) =>
+                ("product_id" in p && p.product_id === col.lookupProductId) ||
+                (p as { product_id?: string }).product_id === col.lookupProductId,
+            ) as
+              | {
+                  customizer?: {
+                    rateTable?: Array<Record<string, string | number | null>>;
+                    cells?: Record<string, string | number | null>;
+                  };
+                  specs?: Record<string, string | number>;
+                }
+              | undefined;
+            const fillKeys =
+              col.lookupFillKeys?.length
+                ? col.lookupFillKeys
+                : ["RATE", "DENSITY", "Rate", "Density"].filter((k) =>
+                    columns.some((c) => c.key.toUpperCase() === k.toUpperCase()),
+                  );
+            const matchKey = col.lookupMatchKey || col.key;
+            const filled = lookupRatesFromProduct(
+              source,
+              String(value),
+              matchKey,
+              fillKeys.length ? fillKeys : ["RATE", "DENSITY"],
+            );
+            // Map filled keys onto this product’s actual column keys (case-insensitive)
+            for (const [srcKey, srcVal] of Object.entries(filled)) {
+              const target =
+                columns.find((c) => c.key.toUpperCase() === srcKey.toUpperCase())?.key || srcKey;
+              cells[target] = srcVal;
+            }
+          }
+          return { ...r, cells };
+        }),
+      );
+      setAdded(false);
+    },
+    [columns, catalogueProducts],
+  );
 
   const updateFormula = useCallback((rowId: string, key: string, formula: string) => {
     setRows((current) =>
@@ -319,7 +497,7 @@ export function AdvancedQuotationCalculator({
   /** Locked / non-editable fields: creators only. Quoters never edit sizeLocked or !editableByQuoter. */
   const canEditColumn = (col: CalcColumn) => {
     if (isCreator) return true;
-    if (col.type === "size" && col.sizeLocked) return false;
+    if (col.type === "dropdown" && col.sizeLocked) return false;
     if (!col.editableByQuoter) return false;
     return true;
   };
@@ -335,7 +513,8 @@ export function AdvancedQuotationCalculator({
       formula: newColType === "formula" ? newColFormula || "=0" : undefined,
       editableByQuoter: newColType !== "formula",
       unit: newColUnit.trim() || undefined,
-      sizeLocked: newColType === "size" ? false : undefined,
+      sizeLocked: newColType === "dropdown" ? false : undefined,
+      options: newColType === "dropdown" ? [] : undefined,
     };
     setColumns((c) => [...c, col]);
     setRows((rs) =>
@@ -344,7 +523,7 @@ export function AdvancedQuotationCalculator({
         cells: {
           ...r.cells,
           [key]:
-            newColType === "number" || newColType === "size"
+            newColType === "number"
               ? 0
               : newColType === "formula"
                 ? null
@@ -413,15 +592,13 @@ export function AdvancedQuotationCalculator({
         if (rateKey) cells[rateKey] = product.selling_price;
         if (unitKey) cells[unitKey] = product.unit || "item";
         for (const col of columns) {
-          if (col.type === "size" && product.specs) {
+          if (col.type === "dropdown" && product.specs) {
             const match = Object.entries(product.specs).find(
               ([k]) =>
-                k.toLowerCase().includes("size") ||
-                k.toLowerCase().includes("dia") ||
-                k.toLowerCase().includes("bore") ||
-                k === col.key.toLowerCase(),
+                k.toLowerCase() === col.key.toLowerCase() ||
+                k.toLowerCase() === col.label.toLowerCase(),
             );
-            if (match) cells[col.key] = match[1];
+            if (match) cells[col.key] = String(match[1]);
           }
         }
         return {
@@ -460,7 +637,7 @@ export function AdvancedQuotationCalculator({
       const rate = Number(r.cells.RATE ?? r.amount / qty) || 0;
       const sizeMeta: Record<string, string | number> = {};
       for (const col of columns) {
-        if (col.type === "size" || col.type === "number") {
+        if (col.type === "dropdown" || col.type === "number") {
           const v = r.cells[col.key];
           if (v !== null && v !== "" && v !== undefined) sizeMeta[col.key] = v as string | number;
         }
@@ -513,8 +690,17 @@ export function AdvancedQuotationCalculator({
     }
     // Store which fields stay unlocked for later editing
     const unlocked = columns
-      .filter((c) => c.editableByQuoter && !(c.type === "size" && c.sizeLocked) && c.type !== "formula")
-      .map((c) => ({ key: c.key, label: c.label, type: c.type, unit: c.unit }));
+      .filter((c) => c.editableByQuoter && !(c.type === "dropdown" && c.sizeLocked) && c.type !== "formula")
+      .map((c) => ({
+        key: c.key,
+        label: c.label,
+        type: c.type,
+        unit: c.unit,
+        options: c.options,
+        lookupProductId: c.lookupProductId,
+        lookupMatchKey: c.lookupMatchKey,
+        lookupFillKeys: c.lookupFillKeys,
+      }));
     onAddToProduct({
       description,
       unit,
@@ -532,7 +718,13 @@ export function AdvancedQuotationCalculator({
           editableByQuoter: !!c.editableByQuoter,
           unit: c.unit,
           sizeLocked: !!c.sizeLocked,
+          options: c.options,
+          lookupProductId: c.lookupProductId,
+          lookupMatchKey: c.lookupMatchKey,
+          lookupFillKeys: c.lookupFillKeys,
         })),
+        // All grid rows → rate table for other products to look up MS/GI/etc. rates
+        rateTable: calculated.map((r) => ({ ...r.cells })),
         rows: calculated.map((r) => ({
           cells: r.cells,
           formulas: r.formulas,
@@ -551,7 +743,7 @@ export function AdvancedQuotationCalculator({
 
   /**
    * Fields shown on the edit card.
-   * Creators see all non-formula columns (including locked sizes) so they can set defaults.
+   * Creators see all non-formula columns (including locked dropdowns) so they can set defaults.
    * Quoters only see unlocked fields.
    */
   const unlockedColumns = useMemo(
@@ -559,7 +751,7 @@ export function AdvancedQuotationCalculator({
       columns.filter((c) => {
         if (c.type === "formula") return false;
         if (isCreator) return true; // creator may edit locked data
-        return c.editableByQuoter && !(c.type === "size" && c.sizeLocked);
+        return c.editableByQuoter && !(c.type === "dropdown" && c.sizeLocked);
       }),
     [columns, isCreator],
   );
@@ -586,7 +778,7 @@ export function AdvancedQuotationCalculator({
           <div>
             <p className="font-semibold">Spreadsheet product builder</p>
             <p className="text-xs text-ink-muted">
-              Excel-style grid to cost a product, lock sizes you do not want edited later, then save
+              Excel-style grid to cost a product, lock dropdowns you do not want edited later, then save
               the result into your product catalogue. Unlocked fields appear on a card for editing.
             </p>
           </div>
@@ -628,7 +820,8 @@ export function AdvancedQuotationCalculator({
                   <th className="p-1.5" title="Quoter may edit">
                     Editable
                   </th>
-                  {isCreator && <th className="p-1.5">Lock size</th>}
+                  {isCreator && <th className="p-1.5">Lock</th>}
+                  <th className="p-1.5">Dropdown choices + product</th>
                   <th className="p-1.5" />
                 </tr>
               </thead>
@@ -660,6 +853,8 @@ export function AdvancedQuotationCalculator({
                             formula: nextFormula,
                             editableByQuoter:
                               nextType === "formula" ? true : col.editableByQuoter,
+                            options: nextType === "dropdown" ? col.options || [] : col.options,
+                            sizeLocked: nextType === "dropdown" ? col.sizeLocked ?? false : undefined,
                           });
                           if (nextType === "formula") {
                             setRows((rs) =>
@@ -678,7 +873,7 @@ export function AdvancedQuotationCalculator({
                       >
                         <option value="text">Text</option>
                         <option value="number">Number</option>
-                        <option value="size">Size</option>
+                        <option value="dropdown">Dropdown</option>
                         <option value="catalogue">Catalogue</option>
                         <option value="formula">Formula</option>
                       </Select>
@@ -732,18 +927,233 @@ export function AdvancedQuotationCalculator({
                     </td>
                     {isCreator && (
                       <td className="p-1 text-center">
-                        {col.type === "size" ? (
+                        {col.type === "dropdown" ? (
                           <input
                             type="checkbox"
                             checked={!!col.sizeLocked}
                             onChange={() => toggleSizeLock(col.id)}
-                            title="Lock size — quoter cannot change"
+                            title="Lock dropdown — quoter cannot change"
                           />
                         ) : (
                           <span className="text-xs text-ink-faint">—</span>
                         )}
                       </td>
                     )}
+                    <td className="p-1">
+                      {col.type === "dropdown" && isCreator ? (
+                        <div className="flex min-w-[280px] flex-col gap-1.5 rounded-md border border-forest/20 bg-leaf/10 p-2">
+                          <label className="text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                            Dropdown choices
+                          </label>
+                          {(col.options || []).length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {(col.options || []).map((opt) => (
+                                <span
+                                  key={opt}
+                                  className="inline-flex items-center gap-1 rounded-full bg-paper px-2 py-0.5 text-xs shadow-border"
+                                >
+                                  {opt}
+                                  <button
+                                    type="button"
+                                    className="text-ink-muted hover:text-clay"
+                                    title={`Remove ${opt}`}
+                                    onClick={() =>
+                                      updateColumnMeta(col.id, {
+                                        options: (col.options || []).filter((o) => o !== opt),
+                                      })
+                                    }
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-[10px] text-ink-muted">No choices yet</p>
+                          )}
+                          <div className="flex gap-1">
+                            <Input
+                              className="h-8 flex-1 text-xs"
+                              value={newOptionText[col.id] || ""}
+                              placeholder="Type one choice e.g. MS"
+                              title="Type a single choice, then Add (or press Enter). No commas needed."
+                              onChange={(e) =>
+                                setNewOptionText((d) => ({ ...d, [col.id]: e.target.value }))
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  const text = (newOptionText[col.id] || "").trim();
+                                  if (!text) return;
+                                  const existing = col.options || [];
+                                  if (existing.some((o) => o.toLowerCase() === text.toLowerCase())) {
+                                    toast.error(`“${text}” is already a choice`);
+                                    return;
+                                  }
+                                  updateColumnMeta(col.id, { options: [...existing, text] });
+                                  setNewOptionText((d) => ({ ...d, [col.id]: "" }));
+                                }
+                              }}
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              className="h-8 shrink-0 px-2"
+                              onClick={() => {
+                                const text = (newOptionText[col.id] || "").trim();
+                                if (!text) {
+                                  toast.error("Type a choice first");
+                                  return;
+                                }
+                                const existing = col.options || [];
+                                if (existing.some((o) => o.toLowerCase() === text.toLowerCase())) {
+                                  toast.error(`“${text}” is already a choice`);
+                                  return;
+                                }
+                                updateColumnMeta(col.id, { options: [...existing, text] });
+                                setNewOptionText((d) => ({ ...d, [col.id]: "" }));
+                              }}
+                            >
+                              Add
+                            </Button>
+                          </div>
+                          <p className="text-[10px] text-ink-muted">
+                            Add one choice at a time (MS → Add, GI → Add, …). No commas.
+                          </p>
+                          <label className="text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                            Add product (rate source)
+                          </label>
+                          <Select
+                            className="h-8 text-xs"
+                            value={col.lookupProductId || ""}
+                            title="When user picks MS/GI/…, copy RATE and DENSITY from this product"
+                            onChange={(e) =>
+                              updateColumnMeta(col.id, {
+                                lookupProductId: e.target.value || undefined,
+                                lookupMatchKey: col.lookupMatchKey || col.key,
+                                lookupFillKeys: col.lookupFillKeys?.length
+                                  ? col.lookupFillKeys
+                                  : ["RATE", "DENSITY"],
+                              })
+                            }
+                          >
+                            <option value="">— Select product —</option>
+                            {catalogueProducts.length === 0 ? (
+                              <option value="" disabled>
+                                No products yet — save Product 1 first
+                              </option>
+                            ) : (
+                              catalogueProducts.map((p) => {
+                                const id =
+                                  "product_id" in p && p.product_id
+                                    ? String(p.product_id)
+                                    : String((p as { product_id?: string }).product_id || p.name);
+                                const name = p.name || id;
+                                const hasTable = Boolean(
+                                  (p as Product).customizer?.rateTable?.length,
+                                );
+                                return (
+                                  <option key={id} value={id}>
+                                    {name}
+                                    {hasTable ? " (has rates)" : ""}
+                                  </option>
+                                );
+                              })
+                            )}
+                          </Select>
+                          {col.lookupProductId ? (
+                            <>
+                              <label className="text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                                Fields to copy (one at a time optional)
+                              </label>
+                              <div className="flex flex-wrap gap-1">
+                                {(col.lookupFillKeys || ["RATE", "DENSITY"]).map((k) => (
+                                  <span
+                                    key={k}
+                                    className="inline-flex items-center gap-1 rounded-full bg-paper px-2 py-0.5 text-xs shadow-border"
+                                  >
+                                    {k}
+                                    <button
+                                      type="button"
+                                      className="text-ink-muted hover:text-clay"
+                                      onClick={() => {
+                                        const next = (col.lookupFillKeys || ["RATE", "DENSITY"]).filter(
+                                          (x) => x !== k,
+                                        );
+                                        updateColumnMeta(col.id, {
+                                          lookupFillKeys: next.length ? next : ["RATE"],
+                                        });
+                                      }}
+                                    >
+                                      ×
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="flex gap-1">
+                                <Input
+                                  className="h-8 flex-1 text-xs"
+                                  value={fillKeysDraft[col.id] || ""}
+                                  placeholder="e.g. RATE"
+                                  onChange={(e) =>
+                                    setFillKeysDraft((d) => ({ ...d, [col.id]: e.target.value }))
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      const text = (fillKeysDraft[col.id] || "").trim();
+                                      if (!text) return;
+                                      const existing = col.lookupFillKeys || ["RATE", "DENSITY"];
+                                      if (existing.some((x) => x.toUpperCase() === text.toUpperCase())) {
+                                        setFillKeysDraft((d) => ({ ...d, [col.id]: "" }));
+                                        return;
+                                      }
+                                      updateColumnMeta(col.id, {
+                                        lookupFillKeys: [...existing, text],
+                                      });
+                                      setFillKeysDraft((d) => ({ ...d, [col.id]: "" }));
+                                    }
+                                  }}
+                                />
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="secondary"
+                                  className="h-8 shrink-0 px-2"
+                                  onClick={() => {
+                                    const text = (fillKeysDraft[col.id] || "").trim();
+                                    if (!text) return;
+                                    const existing = col.lookupFillKeys || ["RATE", "DENSITY"];
+                                    if (existing.some((x) => x.toUpperCase() === text.toUpperCase())) {
+                                      setFillKeysDraft((d) => ({ ...d, [col.id]: "" }));
+                                      return;
+                                    }
+                                    updateColumnMeta(col.id, {
+                                      lookupFillKeys: [...existing, text],
+                                    });
+                                    setFillKeysDraft((d) => ({ ...d, [col.id]: "" }));
+                                  }}
+                                >
+                                  Add
+                                </Button>
+                              </div>
+                            </>
+                          ) : (
+                            <p className="text-[10px] text-ink-muted">
+                              Choose a product to pull RATE / DENSITY when a choice is selected.
+                            </p>
+                          )}
+                        </div>
+                      ) : col.type === "dropdown" ? (
+                        <span className="text-xs text-ink-muted">
+                          {(col.options || []).join(", ") || "—"}
+                          {col.lookupProductId ? " · product linked" : ""}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-ink-faint">—</span>
+                      )}
+                    </td>
                     <td className="p-1">
                       <Button
                         type="button"
@@ -767,7 +1177,7 @@ export function AdvancedQuotationCalculator({
               <Input
                 value={newColLabel}
                 onChange={(e) => setNewColLabel(e.target.value)}
-                placeholder="e.g. Length"
+                placeholder="e.g. Finish"
               />
             </Field>
             <Field label="Type" className="w-36">
@@ -777,7 +1187,7 @@ export function AdvancedQuotationCalculator({
               >
                 <option value="text">Text</option>
                 <option value="number">Number</option>
-                <option value="size">Size</option>
+                <option value="dropdown">Dropdown</option>
                 <option value="catalogue">Catalogue</option>
                 <option value="formula">Formula</option>
               </Select>
@@ -810,8 +1220,8 @@ export function AdvancedQuotationCalculator({
             Supports + − × ÷, parentheses, <code>SIN/COS/TAN</code> (degrees),{" "}
             <code>SINRAD/COSRAD/TANRAD</code> (radians), <code>IF(cond,then,else)</code>,{" "}
             <code>AND/OR/NOT</code>, <code>ABS/SQRT/MIN/MAX/ROUND</code>, <code>PI()</code>.
-            Catalogue columns pick products for rate/description. Size columns can be locked by the
-            product creator.
+            Catalogue columns pick products for rate/description. Dropdown columns use text choices
+            you define (comma-separated) and can be locked by the product creator.
           </p>
         </div>
       )}
@@ -862,21 +1272,23 @@ export function AdvancedQuotationCalculator({
             </p>
             <p className="text-xs text-ink-muted">
               {isCreator
-                ? "Set default values including locked sizes. Locked sizes stay fixed for quoters later."
-                : "These cells stay editable after the product is saved. Lock size columns in Columns if they must not change."}
+                ? "Set default values including locked dropdowns. Locked dropdowns stay fixed for quoters later."
+                : "These cells stay editable after the product is saved. Lock dropdown columns in Columns if they must not change."}
             </p>
           </div>
         </div>
         {unlockedColumns.length === 0 ? (
           <p className="text-xs text-ink-muted">
-            No unlocked fields yet. Mark columns as Editable (and unlock sizes) in Columns.
+            No unlocked fields yet. Mark columns as Editable (and unlock dropdowns) in Columns.
           </p>
         ) : (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {unlockedColumns.map((col) => {
               const primary = calculated[0];
               const value = primary?.cells[col.key];
-              const isNumeric = col.type === "number" || col.type === "size";
+              const isDropdown = col.type === "dropdown";
+              const dropdownOptions = col.options || [];
+              const isNumeric = col.type === "number";
               return (
                 <div
                   key={col.id}
@@ -885,27 +1297,46 @@ export function AdvancedQuotationCalculator({
                   <label className="mb-1 block text-xs text-ink-muted">
                     {col.label}
                     {col.unit ? ` (${col.unit})` : ""}
-                    {col.type === "size" && col.sizeLocked ? (
+                    {isDropdown && col.sizeLocked ? (
                       <span className="ml-1 text-[10px] text-amber-700">locked for quoters</span>
                     ) : null}
                   </label>
-                  <Input
-                    className="h-9"
-                    type={isNumeric ? "number" : "text"}
-                    min={isNumeric ? 0 : undefined}
-                    step={col.type === "size" ? "any" : undefined}
-                    value={value === null || value === undefined ? "" : String(value)}
-                    onChange={(e) => {
-                      if (!primary) return;
-                      const raw = e.target.value;
-                      if (isNumeric) {
-                        updateCell(primary.id, col.key, raw === "" ? 0 : Number(raw));
-                      } else {
-                        updateCell(primary.id, col.key, raw);
-                      }
-                      setSaved(false);
-                    }}
-                  />
+                  {isDropdown ? (
+                    <Select
+                      className="h-9"
+                      value={value === null || value === undefined ? "" : String(value)}
+                      onChange={(e) => {
+                        if (!primary) return;
+                        updateCell(primary.id, col.key, e.target.value);
+                        setSaved(false);
+                      }}
+                    >
+                      <option value="">Select…</option>
+                      {dropdownOptions.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                          {col.unit ? ` ${col.unit}` : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Input
+                      className="h-9"
+                      type={isNumeric ? "number" : "text"}
+                      min={isNumeric ? 0 : undefined}
+                      value={value === null || value === undefined ? "" : String(value)}
+                      onChange={(e) => {
+                        if (!primary) return;
+                        const raw = e.target.value;
+                        if (isNumeric) {
+                          updateCell(primary.id, col.key, raw === "" ? 0 : Number(raw));
+                        } else {
+                          updateCell(primary.id, col.key, raw);
+                        }
+                        setSaved(false);
+                      }}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -930,7 +1361,7 @@ export function AdvancedQuotationCalculator({
                   {col.unit ? (
                     <span className="ml-1 font-normal text-ink-muted">({col.unit})</span>
                   ) : null}
-                  {col.type === "size" && col.sizeLocked ? (
+                  {col.type === "dropdown" && col.sizeLocked ? (
                     <span
                       className="ml-1 text-[10px] text-amber-700"
                       title="Locked — only the product creator can edit"
@@ -1020,14 +1451,36 @@ export function AdvancedQuotationCalculator({
                     );
                   }
 
-                  const isNumeric = col.type === "number" || col.type === "size";
+                  const isDropdown = col.type === "dropdown";
+                  const dropdownOptions = col.options || [];
+                  const isNumeric = col.type === "number";
+                  if (isDropdown) {
+                    return (
+                      <td key={col.id} className="border-b border-ink/10 p-1">
+                        <Select
+                          className="h-8 min-w-28"
+                          value={value === null || value === undefined ? "" : String(value)}
+                          disabled={!editable}
+                          onChange={(e) => {
+                            updateCell(row.id, col.key, e.target.value);
+                          }}
+                        >
+                          <option value="">Select…</option>
+                          {dropdownOptions.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </Select>
+                      </td>
+                    );
+                  }
                   return (
                     <td key={col.id} className="border-b border-ink/10 p-1">
                       <Input
                         className={isNumeric ? "w-24 h-8" : "min-w-28 h-8"}
                         type={isNumeric ? "number" : "text"}
                         min={isNumeric ? 0 : undefined}
-                        step={col.type === "size" ? "any" : undefined}
                         value={value === null || value === undefined ? "" : String(value)}
                         disabled={!editable}
                         onChange={(e) => {

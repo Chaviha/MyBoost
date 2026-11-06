@@ -1,6 +1,6 @@
-/** Printable / downloadable invoices and payment receipts (HTML + browser print/PDF). */
+/** Printable / downloadable invoices, payment receipts, and account statements (HTML + browser print/PDF). */
 
-import type { Invoice, PaymentLineItem } from "./types";
+import type { Invoice, LedgerEntry, PaymentLineItem } from "./types";
 
 export type DocBusiness = {
   business_name: string;
@@ -308,4 +308,146 @@ export function printPaymentReceipt(
   business: DocBusiness,
 ): void {
   printHtml(buildPaymentReceiptHtml(receipt, business));
+}
+
+export type AccountStatementDoc = {
+  customer_name: string;
+  customer_phone?: string;
+  customer_id?: string;
+  /** Inclusive end date (YYYY-MM-DD or ISO). Entries on or before this date are included. */
+  as_of_date: string;
+  /** Opening balance before the first included entry (optional). */
+  opening_balance?: number;
+  /** Current tab balance after filtering (optional). */
+  closing_balance?: number;
+  entries: LedgerEntry[];
+};
+
+/** End of local calendar day for `as_of` so same-day entries are included. */
+function endOfDay(asOf: string): number {
+  const d = new Date(asOf);
+  if (Number.isNaN(d.getTime())) return Date.now();
+  // If only a date (YYYY-MM-DD), treat as end of that day in local time
+  if (/^\d{4}-\d{2}-\d{2}$/.test(asOf.trim())) {
+    d.setHours(23, 59, 59, 999);
+  }
+  return d.getTime();
+}
+
+export function filterLedgerUpToDate(entries: LedgerEntry[], asOfDate: string): LedgerEntry[] {
+  const cutoff = endOfDay(asOfDate);
+  return [...entries]
+    .filter((e) => {
+      const t = new Date(e.date).getTime();
+      return !Number.isNaN(t) && t <= cutoff;
+    })
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+}
+
+export function buildAccountStatementHtml(
+  statement: AccountStatementDoc,
+  business: DocBusiness,
+): string {
+  const rows = statement.entries
+    .map((e) => {
+      const charge = e.type === "charge";
+      const reversed = e.status === "reversed";
+      const debit = charge ? e.amount : 0;
+      const credit = !charge ? e.amount : 0;
+      return `
+    <tr class="${reversed ? "muted" : ""}">
+      <td>${esc(formatDateTime(e.date))}</td>
+      <td>
+        ${esc(e.description || (charge ? "Charge" : "Payment"))}
+        ${e.receipt_number ? `<div class="meta">${esc(e.receipt_number)}</div>` : ""}
+        ${e.invoice_id ? `<div class="meta">Invoice ${esc(e.invoice_id)}</div>` : ""}
+        ${e.method ? `<div class="meta">${esc(e.method)}</div>` : ""}
+        ${reversed ? `<div class="meta">Reversed</div>` : ""}
+      </td>
+      <td class="num">${charge ? esc(money(debit)) : "—"}</td>
+      <td class="num">${!charge ? esc(money(credit)) : "—"}</td>
+    </tr>`;
+    })
+    .join("");
+
+  const totalCharges = statement.entries
+    .filter((e) => e.type === "charge" && e.status !== "reversed")
+    .reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalPayments = statement.entries
+    .filter((e) => e.type === "payment" && e.status !== "reversed")
+    .reduce((s, e) => s + Number(e.amount || 0), 0);
+
+  const body = `
+  <header>
+    <div>
+      <h1>Account statement</h1>
+      <p class="muted" style="margin:0">${esc(business.business_name)}</p>
+      ${business.phone ? `<p class="meta" style="margin:4px 0 0">${esc(business.phone)}</p>` : ""}
+      ${business.email ? `<p class="meta" style="margin:2px 0 0">${esc(business.email)}</p>` : ""}
+      ${business.region ? `<p class="meta" style="margin:2px 0 0">${esc(business.region)}</p>` : ""}
+    </div>
+    <div style="text-align:right">
+      <p style="margin:0;font-weight:600">${esc(statement.customer_name)}</p>
+      ${statement.customer_phone ? `<p class="meta" style="margin:4px 0 0">${esc(statement.customer_phone)}</p>` : ""}
+      ${statement.customer_id ? `<p class="meta" style="margin:2px 0 0">ID ${esc(statement.customer_id)}</p>` : ""}
+      <p class="meta" style="margin:8px 0 0">As of <strong>${esc(formatDate(statement.as_of_date))}</strong></p>
+      <p class="meta" style="margin:2px 0 0">Generated ${esc(formatDateTime(new Date().toISOString()))}</p>
+    </div>
+  </header>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Description</th>
+        <th class="num">Charge</th>
+        <th class="num">Payment</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${
+        rows ||
+        `<tr><td colspan="4" style="padding:16px;color:#666">No movements on or before ${esc(formatDate(statement.as_of_date))}.</td></tr>`
+      }
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="row"><span class="muted">Total charges</span><span>${esc(money(totalCharges))}</span></div>
+    <div class="row"><span class="muted">Total payments</span><span>${esc(money(totalPayments))}</span></div>
+    ${
+      statement.opening_balance !== undefined
+        ? `<div class="row"><span class="muted">Opening balance</span><span>${esc(money(statement.opening_balance))}</span></div>`
+        : ""
+    }
+    <div class="row grand"><span>Balance as of date</span><span>${esc(
+      money(
+        statement.closing_balance !== undefined
+          ? statement.closing_balance
+          : totalCharges - totalPayments + (statement.opening_balance || 0),
+      ),
+    )}</span></div>
+  </div>
+`;
+  return shell(
+    `Statement ${statement.customer_name} as of ${formatDate(statement.as_of_date)}`,
+    body,
+  );
+}
+
+export function downloadAccountStatement(
+  statement: AccountStatementDoc,
+  business: DocBusiness,
+): void {
+  const html = buildAccountStatementHtml(statement, business);
+  const safeName = (statement.customer_name || "customer").replace(/\s+/g, "-");
+  const safeDate = statement.as_of_date.slice(0, 10);
+  downloadHtml(html, `statement-${safeName}-as-of-${safeDate}.html`);
+}
+
+export function printAccountStatement(
+  statement: AccountStatementDoc,
+  business: DocBusiness,
+): void {
+  printHtml(buildAccountStatementHtml(statement, business));
 }
