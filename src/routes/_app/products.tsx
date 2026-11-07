@@ -699,6 +699,8 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   lookupProductId: c.lookupProductId,
                   lookupMatchKey: c.lookupMatchKey,
                   lookupFillKeys: c.lookupFillKeys,
+                  subProducts: c.subProducts,
+                  subColumns: c.subColumns,
                 }));
                 const productId = addProduct({
                   name: payload.description,
@@ -712,6 +714,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   description: "Built with spreadsheet product builder",
                   specs: payload.specs,
                   itemKind: "product",
+                  customizerShared: payload.customizer_shared,
                   customizer: {
                     calculator: "advanced-spreadsheet",
                     columns,
@@ -724,6 +727,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                       .catalogueProductId,
                     catalogueRateKey:
                       (payload.meta as { catalogueRateKey?: string }).catalogueRateKey || "RATE",
+                    catalogueLinks: (payload.meta as { catalogueLinks?: Record<string, string> }).catalogueLinks,
                   },
                 });
                 if (productId) {
@@ -888,6 +892,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   sku: meta.sku ?? builderEditProduct.sku,
                   cost_price: Number(payload.cost_price) || 0,
                   selling_price: Number(payload.selling_price) || 0,
+                  customizer_shared: Boolean(payload.customizer_shared),
                   specs: { ...(builderEditProduct.specs || {}), ...payload.specs },
                   customizer: {
                     calculator: "advanced-spreadsheet",
@@ -903,6 +908,8 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                       lookupProductId: c.lookupProductId,
                       lookupMatchKey: c.lookupMatchKey,
                       lookupFillKeys: c.lookupFillKeys,
+                      subProducts: c.subProducts,
+                      subColumns: c.subColumns,
                     })),
                     cells: (primary?.cells || {}) as Record<string, string | number | null>,
                     formulas: primary?.formulas,
@@ -912,6 +919,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                     catalogueProductId: (meta as { catalogueProductId?: string }).catalogueProductId,
                     catalogueRateKey:
                       (meta as { catalogueRateKey?: string }).catalogueRateKey || "RATE",
+                    catalogueLinks: (meta as { catalogueLinks?: Record<string, string> }).catalogueLinks,
                   },
                   reference_product_id: (meta as { catalogueProductId?: string }).catalogueProductId,
                 });
