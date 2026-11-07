@@ -797,21 +797,39 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
   }
 });
 
-// Customizer products from every business, for the "Reuse customizer product" quotation.
+// Customizer products that their creators chose to share with other businesses, for the
+// "Reuse customizer product" quotation. A product is only included when its creator turned on
+// "Allow other businesses to use this product" (customizer_shared === true) — the default is private.
 // Login required: unlike the public marketplace feed this includes each product's costing
 // formulas and unlocked inputs (needed to recalculate), so it is never exposed anonymously.
+// Cost price and stock are never included.
 app.get("/api/quotation/customizer-products", auth, async (_req, res, next) => {
   try {
     const result = await pool.query("SELECT state FROM user_state");
     const demoBusinessIds = new Set(["BUS001", "BUS002"]);
     const demoProductIds = new Set(["PRD001", "PRD002"]);
     const products = [];
+    // Live prices / rate tables of the owner's own products that a shared product depends on
+    // (catalogue links, sub-product links, dropdown rate sources) so it prices correctly for viewers.
+    const dependencies = [];
+    const seenDeps = new Set();
     for (const row of result.rows) {
       const state = row.state || {};
       const names = new Map((Array.isArray(state.businesses) ? state.businesses : []).map((b) => [b.business_id, b.business_name]));
-      for (const product of Array.isArray(state.products) ? state.products : []) {
+      const ownerProducts = Array.isArray(state.products) ? state.products : [];
+      const byId = new Map(ownerProducts.map((p) => [p?.product_id, p]));
+      const wanted = new Set();
+      const walkSub = (nodes) => {
+        for (const n of Array.isArray(nodes) ? nodes : []) {
+          if (n?.productId) wanted.add(n.productId);
+          for (const v of Object.values(n?.links || {})) wanted.add(v);
+          walkSub(n?.children);
+        }
+      };
+      for (const product of ownerProducts) {
         const c = product?.customizer;
         if (!c || !(Array.isArray(c.columns) && c.columns.length) || product.status === "inactive") continue;
+        if (product.customizer_shared !== true) continue;
         if (demoBusinessIds.has(product.business_id) || demoProductIds.has(product.product_id)) continue;
         products.push({
           product_id: product.product_id,
@@ -824,9 +842,32 @@ app.get("/api/quotation/customizer-products", auth, async (_req, res, next) => {
           selling_price: Number(product.selling_price || 0),
           customizer: c,
         });
+        if (c.catalogueProductId) wanted.add(c.catalogueProductId);
+        if (product.reference_product_id) wanted.add(product.reference_product_id);
+        for (const v of Object.values(c.catalogueLinks || {})) wanted.add(v);
+        for (const col of c.columns) {
+          if (col?.lookupProductId) wanted.add(col.lookupProductId);
+          walkSub(col?.subProducts);
+        }
+      }
+      for (const id of wanted) {
+        const dep = byId.get(id);
+        if (!dep || seenDeps.has(id)) continue;
+        seenDeps.add(id);
+        dependencies.push({
+          product_id: dep.product_id,
+          business_id: dep.business_id,
+          name: dep.name,
+          unit: dep.unit || "item",
+          selling_price: Number(dep.selling_price || 0),
+          specs: dep.specs && typeof dep.specs === "object" ? dep.specs : {},
+          customizer: dep.customizer
+            ? { rateTable: dep.customizer.rateTable, cells: dep.customizer.cells, columns: dep.customizer.columns }
+            : undefined,
+        });
       }
     }
-    res.json({ products });
+    res.json({ products, dependencies });
   } catch (error) {
     next(error);
   }
