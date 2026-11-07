@@ -139,6 +139,7 @@ export function ProductCustomizerEditDialog({
             lookupMatchKey: c.lookupMatchKey,
             lookupFillKeys: c.lookupFillKeys,
             subProducts: c.subProducts,
+            subColumns: c.subColumns,
             locked: lockedForQuoter,
           };
         });
@@ -153,6 +154,7 @@ export function ProductCustomizerEditDialog({
       lookupMatchKey: u.lookupMatchKey,
       lookupFillKeys: u.lookupFillKeys,
       subProducts: u.subProducts,
+      subColumns: u.subColumns,
       locked: false,
     }));
   })();
@@ -173,7 +175,7 @@ export function ProductCustomizerEditDialog({
         Object.assign(
           next,
           subProductSelectionCells(
-            { key, type: "subproduct", subProducts: field.subProducts },
+            { key, type: "subproduct", subProducts: field.subProducts, subColumns: field.subColumns },
             String(value ?? ""),
             state.products,
             config?.catalogueRateKey || "RATE",
