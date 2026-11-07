@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Calculator, Package, ArrowDownToLine, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Field } from "@/components/field";
 import { money, uid } from "@/lib/format";
 import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { Product, ProductCustomizerConfig, QuoteLineItem } from "@/lib/types";
-import type { SubProduct } from "@/lib/sub-products";
+import type { SubColumnDef, SubProduct } from "@/lib/sub-products";
 import { lookupRatesFromProduct } from "@/components/advanced-quotation-calculator";
 import { applyCatalogueValues, resolveCatalogueLinks } from "@/lib/catalogue-sync";
 import { SubProductPicker } from "@/components/sub-product-editor";
@@ -62,10 +62,52 @@ type Props = {
  * Quote from a product-customizer catalogue item using different unlocked inputs.
  * Does not change the saved product — only builds a quotation line.
  */
-export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
+export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) {
+  // Customized products other businesses chose to share, plus the prices they depend on.
+  const [shared, setShared] = useState<{ products: Product[]; dependencies: Product[] }>({
+    products: [],
+    dependencies: [],
+  });
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/quotation/customizer-products", {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { products?: unknown[]; dependencies?: unknown[] };
+        if (cancelled) return;
+        setShared({
+          products: (Array.isArray(data.products) ? data.products : []) as Product[],
+          dependencies: (Array.isArray(data.dependencies) ? data.dependencies : []) as Product[],
+        });
+      } catch {
+        /* offline / not signed in: own products only */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const ownIds = useMemo(() => new Set(ownProducts.map((p) => p.product_id)), [ownProducts]);
+  const foreign = useMemo(
+    () => shared.products.filter((p) => !ownIds.has(p.product_id)),
+    [shared.products, ownIds],
+  );
+  /** Own products plus shared ones' dependencies, for live price / rate-table lookups. */
+  const products = useMemo(
+    () => [...ownProducts, ...shared.dependencies.filter((d) => !ownIds.has(d.product_id))],
+    [ownProducts, shared.dependencies, ownIds],
+  );
+  const businessOf = useMemo(
+    () => new Map(foreign.map((p) => [p.product_id, (p as unknown as { business_name?: string }).business_name || ""])),
+    [foreign],
+  );
   const customizerProducts = useMemo(
-    () =>
-      products.filter((p) => {
+    () => [...ownProducts, ...foreign].filter((p) => {
+      if (!ownIds.has(p.product_id)) return true; // shared products always carry a customizer
         if (p.customizer?.columns?.length) return true;
         if (p.customizer?.unlocked?.length) return true;
         if (p.customizer?.calculator === "advanced-spreadsheet") return true;
@@ -73,8 +115,8 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
         if ((p.description || "").toLowerCase().includes("spreadsheet product builder")) return true;
         if ((p.description || "").toLowerCase().includes("product customizer")) return true;
         return false;
-      }),
-    [products],
+    }),
+    [ownProducts, foreign, ownIds],
   );
 
   const [query, setQuery] = useState("");
@@ -109,13 +151,14 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
         p.unit,
         ...(p.customizer?.columns || []).map((c) => c.label),
         ...(p.customizer?.unlocked || []).map((u) => u.label),
+        businessOf.get(p.product_id),
       ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [customizerProducts, query, categoryFilter]);
+  }, [customizerProducts, query, categoryFilter, businessOf]);
 
   function pickProduct(p: Product) {
     setSelectedId(p.product_id);
@@ -162,6 +205,7 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
         lookupMatchKey: (u as { lookupMatchKey?: string }).lookupMatchKey ?? col?.lookupMatchKey,
         lookupFillKeys: (u as { lookupFillKeys?: string[] }).lookupFillKeys ?? col?.lookupFillKeys,
         subProducts: (u as { subProducts?: SubProduct[] }).subProducts ?? col?.subProducts,
+        subColumns: (u as { subColumns?: SubColumnDef[] }).subColumns ?? col?.subColumns,
       };
     });
 
@@ -180,7 +224,12 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
         Object.assign(
           next,
           subProductSelectionCells(
-            { key, type: "subproduct", subProducts: field?.subProducts ?? col?.subProducts },
+            {
+              key,
+              type: "subproduct",
+              subProducts: field?.subProducts ?? col?.subProducts,
+              subColumns: field?.subColumns ?? col?.subColumns,
+            },
             String(value ?? ""),
             products,
             config?.catalogueRateKey || "RATE",
@@ -341,6 +390,7 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
                 {p.sku ? ` · ${p.sku}` : ""}
                 {" · "}
                 <span className="text-forest">Customizer</span>
+                {businessOf.get(p.product_id) ? ` · from ${businessOf.get(p.product_id)}` : ""}
               </span>
             </span>
             <span className="shrink-0 tabular-nums text-ink-muted">{money(p.selling_price)}</span>
