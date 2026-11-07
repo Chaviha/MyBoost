@@ -26,7 +26,13 @@ import type { MarketplaceProduct, QuoteLineItem, Product } from "@/lib/types";
 import { useLife } from "@/lib/store";
 import { applyCatalogueValues } from "@/lib/catalogue-sync";
 import { SubProductEditor, SubProductPicker } from "@/components/sub-product-editor";
-import { applySubProductRates, subProductSelectionCells, type SubProduct } from "@/lib/sub-products";
+import {
+  applySubProductRates,
+  deriveSubColumns,
+  subProductSelectionCells,
+  type SubColumnDef,
+  type SubProduct,
+} from "@/lib/sub-products";
 
 /** Column data types the product creator / quoter can choose. */
 export type ColumnType = "text" | "number" | "catalogue" | "formula" | "dropdown" | "subproduct";
@@ -54,6 +60,8 @@ export type CalcColumn = {
   lookupFillKeys?: string[];
   /** Sub-products column: products nested inside this product (one dropdown per layer). */
   subProducts?: SubProduct[];
+  /** Sub-products column: the grid's own columns (text / number / formula / catalogue). */
+  subColumns?: SubColumnDef[];
 };
 
 /** Normalize legacy "size" type to "dropdown" and coerce option values to strings. */
@@ -274,6 +282,11 @@ function seedFromProduct(product?: Product): { columns: CalcColumn[]; row: CalcR
     lookupMatchKey: (c as { lookupMatchKey?: string }).lookupMatchKey,
     lookupFillKeys: (c as { lookupFillKeys?: string[] }).lookupFillKeys,
     subProducts: (c as { subProducts?: SubProduct[] }).subProducts,
+    subColumns:
+      (c as { subColumns?: SubColumnDef[] }).subColumns ??
+      (c.type === "subproduct"
+        ? deriveSubColumns((c as { subProducts?: SubProduct[] }).subProducts)
+        : undefined),
   }));
   const base = newRow(columns);
   let catalogueProductId = saved.catalogueProductId || product?.reference_product_id;
@@ -341,6 +354,8 @@ type Props = {
     selling_price: number;
     specs: Record<string, string | number>;
     meta: Record<string, unknown>;
+    /** Creator's choice: may other businesses use this product in their quotations? */
+    customizer_shared?: boolean;
   }) => void;
 };
 
@@ -393,6 +408,9 @@ export function AdvancedQuotationCalculator({
   const [localUnit, setLocalUnit] = useState(initialProduct?.unit || "item");
   const [localCategory, setLocalCategory] = useState(initialProduct?.category || "");
   const [localSku, setLocalSku] = useState(initialProduct?.sku || "");
+  const [shareAcrossBusinesses, setShareAcrossBusinesses] = useState(
+    Boolean(initialProduct?.customizer_shared),
+  );
   const [saved, setSaved] = useState(false);
 
   const calculated = useMemo(() => {
@@ -603,6 +621,7 @@ export function AdvancedQuotationCalculator({
       sizeLocked: newColType === "dropdown" ? false : undefined,
       options: newColType === "dropdown" ? [] : undefined,
       subProducts: newColType === "subproduct" ? [] : undefined,
+      subColumns: newColType === "subproduct" ? [] : undefined,
     };
     setColumns((c) => [...c, col]);
     setRows((rs) =>
@@ -824,12 +843,14 @@ export function AdvancedQuotationCalculator({
         lookupMatchKey: c.lookupMatchKey,
         lookupFillKeys: c.lookupFillKeys,
         subProducts: c.subProducts,
+        subColumns: c.subColumns,
       }));
     onAddToProduct({
       description,
       unit,
       cost_price: cost,
       selling_price: cost,
+      customizer_shared: shareAcrossBusinesses,
       specs,
       meta: {
         calculator: "advanced-spreadsheet",
@@ -847,6 +868,7 @@ export function AdvancedQuotationCalculator({
           lookupMatchKey: c.lookupMatchKey,
           lookupFillKeys: c.lookupFillKeys,
           subProducts: c.subProducts,
+          subColumns: c.subColumns,
         })),
         // All grid rows → rate table for other products to look up MS/GI/etc. rates
         rateTable: calculated.map((r) => ({ ...r.cells })),
@@ -998,6 +1020,7 @@ export function AdvancedQuotationCalculator({
                               nextType === "formula" ? true : col.editableByQuoter,
                             options: nextType === "dropdown" ? col.options || [] : col.options,
                             subProducts: nextType === "subproduct" ? col.subProducts || [] : col.subProducts,
+                            subColumns: nextType === "subproduct" ? col.subColumns || [] : col.subColumns,
                             sizeLocked: nextType === "dropdown" ? col.sizeLocked ?? false : undefined,
                           });
                           if (nextType === "formula") {
@@ -1088,11 +1111,12 @@ export function AdvancedQuotationCalculator({
                       {col.type === "subproduct" && isCreator ? (
                         <SubProductEditor
                           value={col.subProducts || []}
-                          onChange={(next) => updateColumnMeta(col.id, { subProducts: next })}
-                          columnKeys={columns
+                          subColumns={col.subColumns || []}
+                          onChange={(patch) => updateColumnMeta(col.id, patch)}
+                          catalogue={catalogueProducts as Array<{ product_id?: string; name: string; selling_price?: number }>}
+                          sheetColumnKeys={columns
                             .filter((c) => c.type !== "formula" && c.id !== col.id)
                             .map((c) => c.key)}
-                          catalogue={catalogueProducts as Array<{ product_id?: string; name: string; selling_price?: number }>}
                         />
                       ) : null}
                       {col.type === "dropdown" && isCreator ? (
@@ -1375,7 +1399,7 @@ export function AdvancedQuotationCalculator({
             <code>=IF(QTY&gt;10,RATE*0.9,RATE)</code>, <code>=SINDEG(ANGLE)*LENGTH</code>).
             Supports + − × ÷, parentheses, <code>SIN/COS/TAN</code> (degrees),{" "}
             <code>SINRAD/COSRAD/TANRAD</code> (radians), <code>IF(cond,then,else)</code>,{" "}
-            <code>AND/OR/NOT</code>, <code>ABS/SQRT/MIN/MAX/ROUND</code>, <code>PI()</code>.
+            <code>AND/OR/NOT</code>, <code>ASIN/ACOS/ATAN/ATAN2</code> (inverse trig, result in degrees; <code>ASINRAD</code> etc. for radians), <code>ABS/SQRT/MIN/MAX/ROUND</code>, <code>PI()</code>.
             Catalogue columns pick products for rate/description. Dropdown columns use text choices
             you define (comma-separated) and can be locked by the product creator.
           </p>
@@ -1416,6 +1440,27 @@ export function AdvancedQuotationCalculator({
             placeholder="e.g. Fabrication"
           />
         </Field>
+        {isCreator && onAddToProduct ? (
+          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-ink/10 bg-paper px-3 py-2 sm:col-span-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={shareAcrossBusinesses}
+              onChange={(e) => {
+                setShareAcrossBusinesses(e.target.checked);
+                setSaved(false);
+              }}
+            />
+            <span className="text-sm">
+              <span className="font-medium">Allow other businesses to use this product in quotations</span>
+              <span className="block text-xs text-ink-muted">
+                {shareAcrossBusinesses
+                  ? "Shared: any business on LifeBoost can pick this product in a quotation and change its unlocked fields. They see its columns, formulas and rates, never your cost price."
+                  : "Private: only your own business can use this product in quotations."}
+              </span>
+            </span>
+          </label>
+        ) : null}
       </div>
 
       {/* Card of unlocked cells for editing */}
