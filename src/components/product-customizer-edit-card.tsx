@@ -18,6 +18,8 @@ import type { Product, ProductCustomizerConfig, SpecValues } from "@/lib/types";
 import { lookupRatesFromProduct } from "@/components/advanced-quotation-calculator";
 import { useLife } from "@/lib/store";
 import { applyCatalogueValues, resolveCatalogueLinks } from "@/lib/catalogue-sync";
+import { SubProductPicker } from "@/components/sub-product-editor";
+import { applySubProductRates, subProductSelectionCells } from "@/lib/sub-products";
 
 /* evaluateArithmetic imported from @/lib/formula-eval */
 
@@ -95,7 +97,19 @@ export function ProductCustomizerEditDialog({
         }
       }
       // Catalogue columns show the synced price of their linked product, not the link
-      setCells(applyCatalogueValues(next, resolveCatalogueLinks(config, state.products), state.products));
+      const withCatalogue = applyCatalogueValues(
+        next,
+        resolveCatalogueLinks(config, state.products),
+        state.products,
+      );
+      setCells(
+        applySubProductRates(
+          withCatalogue,
+          config?.columns,
+          state.products,
+          config?.catalogueRateKey || "RATE",
+        ),
+      );
     }
   }, [open, product.product_id, config, product.reference_product_id, state.products]);
 
@@ -124,6 +138,7 @@ export function ProductCustomizerEditDialog({
             lookupProductId: c.lookupProductId,
             lookupMatchKey: c.lookupMatchKey,
             lookupFillKeys: c.lookupFillKeys,
+            subProducts: c.subProducts,
             locked: lockedForQuoter,
           };
         });
@@ -137,6 +152,7 @@ export function ProductCustomizerEditDialog({
       lookupProductId: u.lookupProductId,
       lookupMatchKey: u.lookupMatchKey,
       lookupFillKeys: u.lookupFillKeys,
+      subProducts: u.subProducts,
       locked: false,
     }));
   })();
@@ -152,6 +168,20 @@ export function ProductCustomizerEditDialog({
     setCells((c) => {
       const next: Record<string, string | number | null> = { ...c, [key]: value };
       const field = editableFields.find((u) => u.key === key);
+      if (field?.type === "subproduct") {
+        const unitKey = config?.columns?.find((x) => x.key.toUpperCase() === "UNIT")?.key;
+        Object.assign(
+          next,
+          subProductSelectionCells(
+            { key, type: "subproduct", subProducts: field.subProducts },
+            String(value ?? ""),
+            state.products,
+            config?.catalogueRateKey || "RATE",
+            unitKey,
+            config?.columns?.map((x) => x.key),
+          ),
+        );
+      }
       if (field?.type === "dropdown" && field.lookupProductId && value) {
         const source = state.products.find((p) => p.product_id === field.lookupProductId);
         const fillKeys = field.lookupFillKeys?.length
@@ -240,11 +270,17 @@ export function ProductCustomizerEditDialog({
                             {u.label}
                             {u.unit ? ` (${u.unit})` : ""}
                           </label>
-                          {u.type === "catalogue" ? (
+                          {u.type === "subproduct" ? (
+                            <SubProductPicker
+                              tree={u.subProducts}
+                              value={String(value ?? "")}
+                              onChange={(label) => updateField(u.key, label)}
+                            />
+                          ) : u.type === "catalogue" ? (
                             <div className="flex h-9 items-center justify-between rounded-md border border-ink/10 bg-leaf/30 px-3 text-sm">
                               <span className="truncate text-ink-muted">
                                 {state.products.find(
-                                  (p) =>
+                                  (p: Product) =>
                                     p.product_id ===
                                     resolveCatalogueLinks(config, state.products)[u.key],
                                 )?.name || "Catalogue item"}

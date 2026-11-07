@@ -9,8 +9,11 @@ import { Field } from "@/components/field";
 import { money, uid } from "@/lib/format";
 import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { Product, ProductCustomizerConfig, QuoteLineItem } from "@/lib/types";
+import type { SubProduct } from "@/lib/sub-products";
 import { lookupRatesFromProduct } from "@/components/advanced-quotation-calculator";
 import { applyCatalogueValues, resolveCatalogueLinks } from "@/lib/catalogue-sync";
+import { SubProductPicker } from "@/components/sub-product-editor";
+import { applySubProductRates, subProductSelectionCells } from "@/lib/sub-products";
 
 /* evaluateArithmetic imported from @/lib/formula-eval */
 
@@ -127,7 +130,14 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
       }
     }
     // Catalogue columns carry the linked product's synced price, not its id
-    setCells(applyCatalogueValues(nextCells, resolveCatalogueLinks(p.customizer, products), products));
+    setCells(
+      applySubProductRates(
+        applyCatalogueValues(nextCells, resolveCatalogueLinks(p.customizer, products), products),
+        p.customizer?.columns,
+        products,
+        p.customizer?.catalogueRateKey || "RATE",
+      ),
+    );
     setQty("1");
   }
 
@@ -151,6 +161,7 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
         lookupProductId: (u as { lookupProductId?: string }).lookupProductId ?? col?.lookupProductId,
         lookupMatchKey: (u as { lookupMatchKey?: string }).lookupMatchKey ?? col?.lookupMatchKey,
         lookupFillKeys: (u as { lookupFillKeys?: string[] }).lookupFillKeys ?? col?.lookupFillKeys,
+        subProducts: (u as { subProducts?: SubProduct[] }).subProducts ?? col?.subProducts,
       };
     });
 
@@ -164,6 +175,20 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
       const next: Record<string, string | number | null> = { ...c, [key]: value };
       const field = unlocked.find((u) => u.key === key);
       const col = config?.columns?.find((x) => x.key === key);
+      if (field?.type === "subproduct" || col?.type === "subproduct") {
+        const unitKey = config?.columns?.find((x) => x.key.toUpperCase() === "UNIT")?.key;
+        Object.assign(
+          next,
+          subProductSelectionCells(
+            { key, type: "subproduct", subProducts: field?.subProducts ?? col?.subProducts },
+            String(value ?? ""),
+            products,
+            config?.catalogueRateKey || "RATE",
+            unitKey,
+            config?.columns?.map((x) => x.key),
+          ),
+        );
+      }
       const lookupProductId = field?.lookupProductId ?? col?.lookupProductId;
       if ((field?.type === "dropdown" || col?.type === "dropdown") && lookupProductId && value) {
         const source = products.find((p) => p.product_id === lookupProductId);
@@ -356,7 +381,13 @@ export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
                         {u.label}
                         {u.unit ? ` (${u.unit})` : ""}
                       </label>
-                      {u.type === "catalogue" ? (
+                      {u.type === "subproduct" ? (
+                        <SubProductPicker
+                          tree={u.subProducts}
+                          value={String(value ?? "")}
+                          onChange={(label) => updateField(u.key, label)}
+                        />
+                      ) : u.type === "catalogue" ? (
                         <div className="flex h-9 items-center justify-between rounded-md border border-ink/10 bg-leaf/30 px-3 text-sm">
                           <span className="truncate text-ink-muted">
                             {products.find(

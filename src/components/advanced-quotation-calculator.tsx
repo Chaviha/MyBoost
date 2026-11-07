@@ -25,9 +25,11 @@ import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { MarketplaceProduct, QuoteLineItem, Product } from "@/lib/types";
 import { useLife } from "@/lib/store";
 import { applyCatalogueValues } from "@/lib/catalogue-sync";
+import { SubProductEditor, SubProductPicker } from "@/components/sub-product-editor";
+import { applySubProductRates, subProductSelectionCells, type SubProduct } from "@/lib/sub-products";
 
 /** Column data types the product creator / quoter can choose. */
-export type ColumnType = "text" | "number" | "catalogue" | "formula" | "dropdown";
+export type ColumnType = "text" | "number" | "catalogue" | "formula" | "dropdown" | "subproduct";
 
 export type CalcColumn = {
   id: string;
@@ -50,12 +52,14 @@ export type CalcColumn = {
   lookupMatchKey?: string;
   /** Keys to copy from the matched source row (e.g. RATE, DENSITY). */
   lookupFillKeys?: string[];
+  /** Sub-products column: products nested inside this product (one dropdown per layer). */
+  subProducts?: SubProduct[];
 };
 
 /** Normalize legacy "size" type to "dropdown" and coerce option values to strings. */
 function normalizeColumnType(type: string): ColumnType {
   if (type === "size") return "dropdown";
-  if (type === "text" || type === "number" || type === "catalogue" || type === "formula" || type === "dropdown") {
+  if (type === "text" || type === "number" || type === "catalogue" || type === "formula" || type === "dropdown" || type === "subproduct") {
     return type;
   }
   return "text";
@@ -269,6 +273,7 @@ function seedFromProduct(product?: Product): { columns: CalcColumn[]; row: CalcR
     lookupProductId: (c as { lookupProductId?: string }).lookupProductId,
     lookupMatchKey: (c as { lookupMatchKey?: string }).lookupMatchKey,
     lookupFillKeys: (c as { lookupFillKeys?: string[] }).lookupFillKeys,
+    subProducts: (c as { subProducts?: SubProduct[] }).subProducts,
   }));
   const base = newRow(columns);
   let catalogueProductId = saved.catalogueProductId || product?.reference_product_id;
@@ -480,6 +485,21 @@ export function AdvancedQuotationCalculator({
             row = { ...r, cells: synced };
           }
         }
+        // Sub-product columns: keep RATE following the picked product's live price
+        const subRateKey =
+          columns.find((c) => c.key === "RATE")?.key ||
+          columns.find((c) => c.type === "number" && c.key !== "QTY")?.key ||
+          "RATE";
+        const subCells = applySubProductRates(
+          row.cells,
+          columns,
+          catalogueProducts as Array<{ product_id?: string; selling_price?: number }>,
+          subRateKey,
+        );
+        if (subCells !== row.cells) {
+          changed = true;
+          row = { ...row, cells: subCells };
+        }
         if (!row.catalogueProductId) return row;
         r = row;
         const src = catalogueProducts.find(
@@ -582,6 +602,7 @@ export function AdvancedQuotationCalculator({
       unit: newColUnit.trim() || undefined,
       sizeLocked: newColType === "dropdown" ? false : undefined,
       options: newColType === "dropdown" ? [] : undefined,
+      subProducts: newColType === "subproduct" ? [] : undefined,
     };
     setColumns((c) => [...c, col]);
     setRows((rs) =>
@@ -640,6 +661,26 @@ export function AdvancedQuotationCalculator({
 
   function updateColumnMeta(id: string, patch: Partial<CalcColumn>) {
     setColumns((c) => c.map((col) => (col.id === id ? { ...col, ...patch } : col)));
+  }
+
+  /** Sub-products: save the picked path and fill RATE / UNIT from the deepest picked product. */
+  function setSubProduct(rowId: string, col: CalcColumn, label: string) {
+    const rateKey =
+      columns.find((c) => c.key === "RATE")?.key ||
+      columns.find((c) => c.type === "number" && c.key !== "QTY")?.key;
+    const unitKey = columns.find((c) => c.key === "UNIT")?.key;
+    const patch = subProductSelectionCells(
+      col,
+      label,
+      catalogueProducts as Array<{ product_id?: string; selling_price?: number }>,
+      rateKey,
+      unitKey,
+      columns.map((c) => c.key),
+    );
+    setRows((current) =>
+      current.map((r) => (r.id === rowId ? { ...r, cells: { ...r.cells, ...patch } } : r)),
+    );
+    setAdded(false);
   }
 
   function pickCatalogue(rowId: string, colKey: string, product: MarketplaceProduct | Product) {
@@ -782,6 +823,7 @@ export function AdvancedQuotationCalculator({
         lookupProductId: c.lookupProductId,
         lookupMatchKey: c.lookupMatchKey,
         lookupFillKeys: c.lookupFillKeys,
+        subProducts: c.subProducts,
       }));
     onAddToProduct({
       description,
@@ -804,6 +846,7 @@ export function AdvancedQuotationCalculator({
           lookupProductId: c.lookupProductId,
           lookupMatchKey: c.lookupMatchKey,
           lookupFillKeys: c.lookupFillKeys,
+          subProducts: c.subProducts,
         })),
         // All grid rows → rate table for other products to look up MS/GI/etc. rates
         rateTable: calculated.map((r) => ({ ...r.cells })),
@@ -954,6 +997,7 @@ export function AdvancedQuotationCalculator({
                             editableByQuoter:
                               nextType === "formula" ? true : col.editableByQuoter,
                             options: nextType === "dropdown" ? col.options || [] : col.options,
+                            subProducts: nextType === "subproduct" ? col.subProducts || [] : col.subProducts,
                             sizeLocked: nextType === "dropdown" ? col.sizeLocked ?? false : undefined,
                           });
                           if (nextType === "formula") {
@@ -975,6 +1019,7 @@ export function AdvancedQuotationCalculator({
                         <option value="number">Number</option>
                         <option value="dropdown">Dropdown</option>
                         <option value="catalogue">Catalogue</option>
+                        <option value="subproduct">Sub-products</option>
                         <option value="formula">Formula</option>
                       </Select>
                     </td>
@@ -1040,6 +1085,16 @@ export function AdvancedQuotationCalculator({
                       </td>
                     )}
                     <td className="p-1">
+                      {col.type === "subproduct" && isCreator ? (
+                        <SubProductEditor
+                          value={col.subProducts || []}
+                          onChange={(next) => updateColumnMeta(col.id, { subProducts: next })}
+                          columnKeys={columns
+                            .filter((c) => c.type !== "formula" && c.id !== col.id)
+                            .map((c) => c.key)}
+                          catalogue={catalogueProducts as Array<{ product_id?: string; name: string; selling_price?: number }>}
+                        />
+                      ) : null}
                       {col.type === "dropdown" && isCreator ? (
                         <div className="flex min-w-[280px] flex-col gap-1.5 rounded-md border border-forest/20 bg-leaf/10 p-2">
                           <label className="text-[10px] font-medium uppercase tracking-wide text-ink-muted">
@@ -1250,7 +1305,7 @@ export function AdvancedQuotationCalculator({
                           {(col.options || []).join(", ") || "—"}
                           {col.lookupProductId ? " · product linked" : ""}
                         </span>
-                      ) : (
+                      ) : col.type === "subproduct" && isCreator ? null : (
                         <span className="text-xs text-ink-faint">—</span>
                       )}
                     </td>
@@ -1289,6 +1344,7 @@ export function AdvancedQuotationCalculator({
                 <option value="number">Number</option>
                 <option value="dropdown">Dropdown</option>
                 <option value="catalogue">Catalogue</option>
+                <option value="subproduct">Sub-products</option>
                 <option value="formula">Formula</option>
               </Select>
             </Field>
@@ -1559,6 +1615,19 @@ export function AdvancedQuotationCalculator({
                             ))}
                           </ul>
                         )}
+                      </td>
+                    );
+                  }
+
+                  if (col.type === "subproduct") {
+                    return (
+                      <td key={col.id} className="border-b border-ink/10 p-1 min-w-[160px]">
+                        <SubProductPicker
+                          tree={col.subProducts}
+                          value={String(value ?? "")}
+                          disabled={!editable}
+                          onChange={(label) => setSubProduct(row.id, col, label)}
+                        />
                       </td>
                     );
                   }

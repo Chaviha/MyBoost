@@ -1,3 +1,4 @@
+import type { SubProduct } from "@/lib/sub-products";
 export type AccountLevel = "admin" | "owner" | "user";
 
 export type RelationshipType = "owner" | "employee" | "customer" | "supplier";
@@ -360,7 +361,7 @@ export type Product = {
 export type ProductCustomizerColumn = {
   key: string;
   label: string;
-  type: "text" | "number" | "catalogue" | "formula" | "dropdown";
+  type: "text" | "number" | "catalogue" | "formula" | "dropdown" | "subproduct";
   formula?: string;
   editableByQuoter: boolean;
   unit?: string;
@@ -377,6 +378,8 @@ export type ProductCustomizerColumn = {
   lookupMatchKey?: string;
   /** Column keys to copy from the matched source row into this product’s cells (e.g. RATE, DENSITY). */
   lookupFillKeys?: string[];
+  /** Sub-products column: products nested inside this product (tree → one dropdown per layer). */
+  subProducts?: SubProduct[];
 };
 
 export type ProductCustomizerConfig = {
@@ -396,6 +399,7 @@ export type ProductCustomizerConfig = {
     lookupProductId?: string;
     lookupMatchKey?: string;
     lookupFillKeys?: string[];
+    subProducts?: SubProduct[];
   }>;
   total?: number;
   /**

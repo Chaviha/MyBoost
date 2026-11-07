@@ -1,3 +1,4 @@
+import type { SubProduct } from "@/lib/sub-products";
 import type { Product, ProductCustomizerConfig } from "@/lib/types";
 
 type Cells = Record<string, string | number | null>;
@@ -39,8 +40,12 @@ export function applyCatalogueValues(
 export function linksTo(config: ProductCustomizerConfig | undefined, sourceId: string): boolean {
   if (!config) return false;
   if (Object.values(config.catalogueLinks || {}).includes(sourceId)) return true;
+  const hasSub = (nodes: SubProduct[] | undefined): boolean =>
+    (nodes || []).some((n) => n.productId === sourceId || hasSub(n.children));
   return (config.columns || []).some(
-    (c) => c.type === "catalogue" && String(config.cells?.[c.key] ?? "") === sourceId,
+    (c) =>
+      (c.type === "catalogue" && String(config.cells?.[c.key] ?? "") === sourceId) ||
+      (c.type === "subproduct" && hasSub(c.subProducts)),
   );
 }
 
