@@ -1,4 +1,4 @@
-import type { SubProduct } from "@/lib/sub-products";
+import type { SubColumnDef, SubProduct } from "@/lib/sub-products";
 export type AccountLevel = "admin" | "owner" | "user";
 
 export type RelationshipType = "owner" | "employee" | "customer" | "supplier";
@@ -355,6 +355,12 @@ export type Product = {
    * a card and edit unlocked fields (sizes, qty, rates, etc.) and refresh costing.
    */
   customizer?: ProductCustomizerConfig;
+  /**
+   * Customized products only. When true, other businesses can find this product and use it in
+   * their own quotations (they get its columns, formulas and unlocked inputs, never your cost
+   * price). Off by default; the creator turns it on in the product builder.
+   */
+  customizer_shared?: boolean;
 };
 
 /** Column / unlock config saved with a product built via the spreadsheet customizer. */
@@ -380,6 +386,8 @@ export type ProductCustomizerColumn = {
   lookupFillKeys?: string[];
   /** Sub-products column: products nested inside this product (tree → one dropdown per layer). */
   subProducts?: SubProduct[];
+  /** The sub-product grid's own columns (text / number / formula / catalogue). */
+  subColumns?: SubColumnDef[];
 };
 
 export type ProductCustomizerConfig = {
@@ -400,6 +408,7 @@ export type ProductCustomizerConfig = {
     lookupMatchKey?: string;
     lookupFillKeys?: string[];
     subProducts?: SubProduct[];
+    subColumns?: SubColumnDef[];
   }>;
   total?: number;
   /**
