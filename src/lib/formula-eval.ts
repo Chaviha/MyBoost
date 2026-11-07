@@ -6,6 +6,8 @@
  *   SIN, COS, TAN  (degrees — LifeBoost default for shop angles)
  *   SINDEG, COSDEG, TANDEG  (same as SIN/COS/TAN, degrees)
  *   SINRAD, COSRAD, TANRAD  (radians, Excel-style)
+ *   ASIN, ACOS, ATAN, ATAN2(y,x)  (inverse trig — result in degrees; ASINDEG etc. are the same)
+ *   ASINRAD, ACOSRAD, ATANRAD, ATAN2RAD  (result in radians, Excel-style)
  *   ABS, SQRT, MIN, MAX, ROUND, FLOOR, CEIL, PI()
  *   IF(condition, then, else)
  *   Comparisons in IF: < > <= >= = == <> !=
@@ -218,6 +220,8 @@ export function evaluateFormula(expression: string): number {
 
   function callFn(name: string, args: number[]): number {
     const toRad = (degrees: number) => (degrees * Math.PI) / 180;
+    // Strip floating-point noise from inverse trig results (30.000000000000004 → 30)
+    const tidy = (n: number) => Math.round(n * 1e10) / 1e10;
     switch (name) {
       // Degrees (default) — SIN(30) = 0.5
       case "SIN":
@@ -242,6 +246,37 @@ export function evaluateFormula(expression: string): number {
       case "TANRAD":
         if (args.length !== 1) throw new Error("TANRAD needs 1 argument (radians).");
         return Math.tan(args[0]);
+      // Inverse trig — ASIN(0.5) = 30 (degrees). Input must be between -1 and 1 for ASIN/ACOS.
+      case "ASIN":
+      case "ASINDEG":
+      case "ASINRAD": {
+        if (args.length !== 1) throw new Error(`${name} needs 1 argument (a number from -1 to 1).`);
+        if (args[0] < -1 || args[0] > 1) throw new Error(`${name} needs a value between -1 and 1.`);
+        const r = Math.asin(args[0]);
+        return name === "ASINRAD" ? tidy(r) : tidy((r * 180) / Math.PI);
+      }
+      case "ACOS":
+      case "ACOSDEG":
+      case "ACOSRAD": {
+        if (args.length !== 1) throw new Error(`${name} needs 1 argument (a number from -1 to 1).`);
+        if (args[0] < -1 || args[0] > 1) throw new Error(`${name} needs a value between -1 and 1.`);
+        const r = Math.acos(args[0]);
+        return name === "ACOSRAD" ? tidy(r) : tidy((r * 180) / Math.PI);
+      }
+      case "ATAN":
+      case "ATANDEG":
+      case "ATANRAD": {
+        if (args.length !== 1) throw new Error(`${name} needs 1 argument.`);
+        const r = Math.atan(args[0]);
+        return name === "ATANRAD" ? tidy(r) : tidy((r * 180) / Math.PI);
+      }
+      case "ATAN2":
+      case "ATAN2DEG":
+      case "ATAN2RAD": {
+        if (args.length !== 2) throw new Error(`${name} needs 2 arguments: ${name}(y, x).`);
+        const r = Math.atan2(args[0], args[1]);
+        return name === "ATAN2RAD" ? tidy(r) : tidy((r * 180) / Math.PI);
+      }
       case "ABS":
         if (args.length !== 1) throw new Error("ABS needs 1 argument.");
         return Math.abs(args[0]);
