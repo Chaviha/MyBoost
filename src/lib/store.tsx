@@ -1679,6 +1679,8 @@ export function LifeProvider({ children }: { children: ReactNode }) {
         family?: string;
         itemKind?: "product" | "service";
         customizer?: import("./types").ProductCustomizerConfig;
+        /** Let other businesses use this customized product in their quotations. */
+        customizerShared?: boolean;
         reference_product_id?: string;
       }) => {
         const product_id = uid("PRD");
@@ -1713,6 +1715,7 @@ export function LifeProvider({ children }: { children: ReactNode }) {
               price_factor: 1,
               pricing_unit: form.unit || "unit",
               reference_product_id: refId,
+              customizer_shared: form.customizer ? Boolean(form.customizerShared) : undefined,
               customizer: form.customizer
                 ? {
                     ...form.customizer,
