@@ -21,3 +21,26 @@ export function interleaveByOwner<T>(items: T[]): T[] {
   }
   return mixed;
 }
+
+/**
+ * Fisher–Yates shuffle. Returns a new array; does not mutate the input.
+ */
+export function shuffleRandom<T>(items: T[]): T[] {
+  const copy = items.slice();
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = copy[i];
+    copy[i] = copy[j];
+    copy[j] = tmp;
+  }
+  return copy;
+}
+
+/**
+ * Pick up to `count` items at random for a marketplace showcase.
+ * New random selection every call (e.g. page refresh / data load).
+ */
+export function pickRandomShowcase<T>(items: T[], count = 6): T[] {
+  if (!items.length || count <= 0) return [];
+  return shuffleRandom(items).slice(0, Math.min(count, items.length));
+}

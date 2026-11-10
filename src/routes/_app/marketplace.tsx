@@ -23,6 +23,7 @@ import {
   filterListings,
   MarketKindChips,
   MarketplaceListings,
+  ProductShowcase,
   type MarketKind,
 } from "@/components/marketplace-listings";
 import { PageHeader } from "@/components/page-header";
@@ -35,7 +36,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { initials, money } from "@/lib/format";
-import type { Asset, Business, Employee } from "@/lib/types";
+import type { Asset, Business, Employee, MarketplaceListing } from "@/lib/types";
 import { useLife } from "@/lib/store";
 
 export const Route = createFileRoute("/_app/marketplace")({
@@ -303,6 +304,10 @@ function MarketplacePage() {
 
         {/* MARKET: products, services, assets and professionals */}
         <TabsContent value="market">
+          {!ql && kind === "all" ? (
+            <ProductShowcase listings={publicMarketplace.listings as MarketplaceListing[]} />
+          ) : null}
+
           <MarketKindChips kind={kind} onChange={setKind} />
 
           {nothingToShow ? (

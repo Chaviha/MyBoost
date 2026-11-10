@@ -9,10 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ListingCover } from "@/components/listing-cover";
 import { PagedGrid } from "@/components/paged-grid";
-import { filterListings, MarketKindChips, MarketplaceListings, type MarketKind } from "@/components/marketplace-listings";
+import { filterListings, MarketKindChips, MarketplaceListings, ProductShowcase, type MarketKind } from "@/components/marketplace-listings";
 import { useLife } from "@/lib/store";
 import { initials, money } from "@/lib/format";
-import type { Asset, Business, Employee } from "@/lib/types";
+import type { Asset, Business, Employee, MarketplaceListing } from "@/lib/types";
 
 function openWhatsApp(phone: string, text: string) {
   const digits = (phone || "").replace(/[^0-9]/g, "");
@@ -109,6 +109,9 @@ export function PublicMarketplace() {
             </TabsContent>
 
             <TabsContent value="market">
+              {!loading && !serverError && !query && kind === "all" ? (
+                <ProductShowcase listings={publicMarketplace.listings as MarketplaceListing[]} />
+              ) : null}
               <div className="mt-4"><MarketKindChips kind={kind} onChange={setKind} /></div>
               {nothingToShow ? <Card className="p-10 text-center"><Store className="mx-auto size-8 text-ink-faint" /><p className="mt-3 font-medium">{q || kind !== "all" ? "Nothing matches your search." : "Nothing is listed yet."}</p></Card> : null}
               {listings.length > 0 ? <section className="mb-8">{kind === "all" ? <h2 className="mb-3 font-display text-lg font-medium">Products &amp; services</h2> : null}<MarketplaceListings items={listings} resetKey={resetKey} /></section> : null}
