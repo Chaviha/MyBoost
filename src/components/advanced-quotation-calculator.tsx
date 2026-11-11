@@ -25,7 +25,11 @@ import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { MarketplaceProduct, QuoteLineItem, Product } from "@/lib/types";
 import { useLife } from "@/lib/store";
 import { applyCatalogueValues } from "@/lib/catalogue-sync";
-import { listProductRateOptions, resolveCatalogueRate } from "@/lib/rate-table-select";
+import {
+  listProductRateOptions,
+  resolveCatalogueRate,
+  resolveEffectiveRateConfig,
+} from "@/lib/rate-table-select";
 import { SubProductEditor, SubProductPicker } from "@/components/sub-product-editor";
 import {
   applySubProductRates,
@@ -872,11 +876,33 @@ export function AdvancedQuotationCalculator({
     );
     setCatalogueSearch((s) => ({ ...s, [rowId + colKey]: "" }));
     setAdded(false);
+    // Wire dropdown columns to use the same rate table / list as the source product
+    const srcOpts = listProductRateOptions(
+      product as { customizer?: Product["customizer"]; selling_price?: number; name?: string },
+    );
+    if (productId && srcOpts.length) {
+      setColumns((cols) =>
+        cols.map((c) => {
+          if (c.type !== "dropdown") return c;
+          // Attach as lookup source so options come from the same table as the source
+          if (!c.lookupProductId || c.lookupProductId === productId) {
+            return {
+              ...c,
+              lookupProductId: productId,
+              lookupMatchKey: c.lookupMatchKey || c.key,
+              lookupFillKeys: c.lookupFillKeys?.length ? c.lookupFillKeys : ["RATE", "DENSITY"],
+              options: srcOpts.map((o) => o.value),
+            };
+          }
+          return c;
+        }),
+      );
+    }
     toast.success(
       productId
         ? variant
-          ? `Linked “${product.name}” · ${variant} — syncs product + that dropdown row`
-          : `Linked “${product.name}” — price will stay in sync with the catalogue`
+          ? `Linked “${product.name}” · ${variant} — uses the same rate table as the source`
+          : `Linked “${product.name}” — synced; dropdowns use the same product list / rate table`
         : `Linked “${product.name}”`,
     );
   }
@@ -992,6 +1018,24 @@ export function AdvancedQuotationCalculator({
       return undefined;
     }
 
+    /** Prefer the linked source product's rate table so the synced product uses the same table. */
+    function effectiveRateTableForSave(
+      rowCatalogueProductId?: string,
+    ): Array<Record<string, string | number | null>> {
+      const fromGrid = calculated.map((row) => ({ ...row.cells }));
+      const sourceId = rowCatalogueProductId;
+      if (!sourceId) return fromGrid;
+      const src = catalogueProducts.find(
+        (p) =>
+          ("product_id" in p && p.product_id === sourceId) ||
+          (p as { product_id?: string }).product_id === sourceId,
+      ) as Product | undefined;
+      if (src?.customizer?.rateTable?.length) {
+        return src.customizer.rateTable.map((r) => ({ ...r }));
+      }
+      return fromGrid;
+    }
+
     /** One catalogue product payload from a single grid row (final product on that row). */
     function payloadForRow(
       r: (typeof calculated)[number],
@@ -1050,7 +1094,7 @@ export function AdvancedQuotationCalculator({
         meta: {
           calculator: "advanced-spreadsheet",
           columns: columnMeta,
-          rateTable: calculated.map((row) => ({ ...row.cells })),
+          rateTable: effectiveRateTableForSave(r.catalogueProductId),
           rows: rowList,
           total: cost,
           unlocked,
@@ -1966,9 +2010,26 @@ export function AdvancedQuotationCalculator({
                   }
 
                   const isDropdown = col.type === "dropdown";
-                  const dropdownOptions = col.options || [];
                   const isNumeric = col.type === "number";
                   if (isDropdown) {
+                    // When linked to a catalogue product with a rate table / product list,
+                    // the dropdown options are that product's available rows so the user can swap.
+                    const lookupSrc = col.lookupProductId
+                      ? (catalogueProducts.find(
+                          (p) =>
+                            ("product_id" in p && p.product_id === col.lookupProductId) ||
+                            (p as { product_id?: string }).product_id === col.lookupProductId,
+                        ) as Product | undefined)
+                      : undefined;
+                    const fromLinked = listProductRateOptions(lookupSrc);
+                    const dropdownOptions =
+                      fromLinked.length > 0
+                        ? fromLinked.map((o) => o.value)
+                        : col.options || [];
+                    const optionLabels =
+                      fromLinked.length > 0
+                        ? Object.fromEntries(fromLinked.map((o) => [o.value, o.label]))
+                        : Object.fromEntries((col.options || []).map((o) => [o, o]));
                     return (
                       <td key={col.id} className="border-b border-ink/10 p-1">
                         <Select
@@ -1982,10 +2043,15 @@ export function AdvancedQuotationCalculator({
                           <option value="">Select…</option>
                           {dropdownOptions.map((opt) => (
                             <option key={opt} value={opt}>
-                              {opt}
+                              {optionLabels[opt] || opt}
                             </option>
                           ))}
                         </Select>
+                        {fromLinked.length > 0 ? (
+                          <p className="px-0.5 pt-0.5 text-[10px] text-ink-muted">
+                            From linked product list — change to swap rates
+                          </p>
+                        ) : null}
                       </td>
                     );
                   }

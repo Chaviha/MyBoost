@@ -153,3 +153,72 @@ export function resolveCatalogueRate(
   }
   return null;
 }
+
+/**
+ * For a product that syncs to a catalogue source, use the source product's rate table
+ * (same table as the source) when the local config has no table or is linked for sync.
+ */
+export function resolveEffectiveRateConfig(
+  config: ProductCustomizerConfig | undefined,
+  products: Array<{
+    product_id?: string;
+    customizer?: ProductCustomizerConfig | null;
+  }>,
+  options?: { preferSource?: boolean },
+): ProductCustomizerConfig | undefined {
+  if (!config) return config;
+  const preferSource = options?.preferSource !== false;
+
+  const sourceIds: string[] = [];
+  if (config.catalogueProductId) sourceIds.push(config.catalogueProductId);
+  for (const id of Object.values(config.catalogueLinks || {})) {
+    if (id) sourceIds.push(id);
+  }
+  for (const col of config.columns || []) {
+    if (col.lookupProductId) sourceIds.push(col.lookupProductId);
+  }
+
+  let sourceTable: Array<Record<string, string | number | null>> | undefined;
+  let sourceConfig: ProductCustomizerConfig | undefined;
+  for (const id of sourceIds) {
+    const src = products.find((p) => p.product_id === id);
+    if (src?.customizer?.rateTable?.length) {
+      sourceTable = src.customizer.rateTable;
+      sourceConfig = src.customizer;
+      break;
+    }
+  }
+
+  if (!sourceTable?.length) return config;
+
+  // Linked/synced product: always expose the source rate table as the working table
+  if (preferSource || !config.rateTable?.length) {
+    return {
+      ...config,
+      rateTable: sourceTable,
+      // Keep local columns/unlocked; identity key still works via pickRowSelectKey on merged view
+    };
+  }
+  return config;
+}
+
+/**
+ * Resolve the live source product used for rate-table sync (if any).
+ */
+export function resolveRateTableSourceProduct<
+  T extends { product_id?: string; customizer?: ProductCustomizerConfig | null },
+>(
+  config: ProductCustomizerConfig | undefined,
+  products: T[],
+): T | undefined {
+  if (!config) return undefined;
+  const ids: string[] = [];
+  if (config.catalogueProductId) ids.push(config.catalogueProductId);
+  for (const id of Object.values(config.catalogueLinks || {})) if (id) ids.push(id);
+  for (const col of config.columns || []) if (col.lookupProductId) ids.push(col.lookupProductId);
+  for (const id of ids) {
+    const src = products.find((p) => p.product_id === id);
+    if (src?.customizer?.rateTable?.length) return src;
+  }
+  return undefined;
+}

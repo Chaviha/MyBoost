@@ -16,6 +16,12 @@ import { money } from "@/lib/format";
 import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { Product, ProductCustomizerConfig, SpecValues } from "@/lib/types";
 import { lookupRatesFromProductDetailed } from "@/components/advanced-quotation-calculator";
+import {
+  listProductRateOptions,
+  resolveCatalogueRate,
+  resolveEffectiveRateConfig,
+  resolveRateTableSourceProduct,
+} from "@/lib/rate-table-select";
 import { useLife } from "@/lib/store";
 import { applyCatalogueValues, resolveCatalogueLinks } from "@/lib/catalogue-sync";
 import { SubProductPicker } from "@/components/sub-product-editor";
@@ -129,6 +135,34 @@ function applyRateTableRow(
 }
 
 
+
+/** Merge edited cells into the product rate table so spreadsheet editor stays in sync. */
+function mergeCellsIntoRateTable(
+  rateTable: Array<Record<string, string | number | null>> | undefined,
+  cells: Record<string, string | number | null>,
+  identityKey: string | null,
+): Array<Record<string, string | number | null>> {
+  const row = { ...cells };
+  if (!rateTable?.length) return [row];
+
+  const next = rateTable.map((r) => ({ ...r }));
+  if (identityKey) {
+    const want = String(cells[identityKey] ?? "").trim().toLowerCase();
+    if (want) {
+      const idx = next.findIndex(
+        (r) => String(r[identityKey] ?? "").trim().toLowerCase() === want,
+      );
+      if (idx >= 0) {
+        next[idx] = { ...next[idx], ...row };
+        return next;
+      }
+    }
+  }
+  // Default: update primary row (what Edit in product customizer seeds first)
+  next[0] = { ...next[0], ...row };
+  return next;
+}
+
 type Props = {
   product: Product;
   open: boolean;
@@ -205,7 +239,18 @@ export function ProductCustomizerEditDialog({
   }, [open, product.product_id, config, product.reference_product_id, state.products]);
 
   const unlocked = config?.unlocked || [];
-  const rateSelect = useMemo(() => rateTableSelectOptions(config), [config]);
+  const effectiveConfig = useMemo(
+    () => resolveEffectiveRateConfig(config, state.products, { preferSource: true }),
+    [config, state.products],
+  );
+  const rateSourceProduct = useMemo(
+    () => resolveRateTableSourceProduct(config, state.products),
+    [config, state.products],
+  );
+  const rateSelect = useMemo(
+    () => rateTableSelectOptions(effectiveConfig),
+    [effectiveConfig],
+  );
 
   /** Only unlocked fields are shown: locked sizes and columns with Editable unchecked are hidden.
    *  When the product has a spreadsheet rate table, the first column is forced to a dropdown
@@ -421,10 +466,25 @@ export function ProductCustomizerEditDialog({
         }
       }
     }
+    const identityKey = rateSelect.key;
+    // Prefer the live source rate table when this product syncs to another product
+    const baseTable =
+      rateSourceProduct?.customizer?.rateTable?.length
+        ? rateSourceProduct.customizer.rateTable
+        : config.rateTable;
+    const nextRateTable = mergeCellsIntoRateTable(
+      baseTable,
+      cellsToSave,
+      identityKey,
+    );
+
     const nextConfig: ProductCustomizerConfig = {
       ...config,
       cells: cellsToSave,
+      formulas: { ...(config.formulas || {}) },
       total: computed.total,
+      // Same table as the source product (snapshot of source rows + local cell edits)
+      rateTable: nextRateTable,
     };
     onSave({
       specs,
@@ -432,7 +492,7 @@ export function ProductCustomizerEditDialog({
       selling_price: computed.total,
       customizer: nextConfig,
     });
-    toast.success("Product updated from editable fields.");
+    toast.success("Product updated — spreadsheet customizer values saved too.");
     onOpenChange(false);
   }
 
@@ -471,6 +531,94 @@ export function ProductCustomizerEditDialog({
             Select which customized product you want to utilize or edit.
           </p>
         </div>
+
+        {(() => {
+          const links = resolveCatalogueLinks(config, state.products);
+          const variants = config.catalogueVariants || {};
+          const entries = Object.entries(links);
+          if (!entries.length && config.catalogueProductId) {
+            entries.push(["RATE", config.catalogueProductId]);
+          }
+          if (!entries.length) return null;
+          return (
+            <div className="space-y-2 rounded-md border border-forest/20 bg-paper px-3 py-2">
+              <p className="text-xs font-medium text-ink-muted">
+                Synced catalogue product — swap dropdown option
+              </p>
+              {entries.map(([colKey, productId]) => {
+                const src = state.products.find((p) => p.product_id === productId);
+                const opts = listProductRateOptions(src);
+                if (!opts.length) {
+                  return (
+                    <p key={colKey} className="text-[11px] text-ink-muted">
+                      {src?.name || productId}: no product list / rate table to swap
+                    </p>
+                  );
+                }
+                const current = variants[colKey] || String(cells[colKey] ?? "");
+                return (
+                  <div key={colKey} className="space-y-1">
+                    <label className="block text-[11px] text-ink-muted">
+                      {src?.name || productId}
+                      <span className="text-ink-faint"> · {colKey}</span>
+                    </label>
+                    <Select
+                      className="h-9"
+                      value={
+                        opts.some((o) => o.value === current)
+                          ? current
+                          : opts.find((o) => o.label === current)?.value || ""
+                      }
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (!v) return;
+                        const rate = resolveCatalogueRate(src, v);
+                        setCells((c) => {
+                          const next = { ...c };
+                          // Apply rate to RATE / catalogue column keys
+                          const rateKey = config.catalogueRateKey || "RATE";
+                          if (rate !== null) {
+                            next[rateKey] = rate;
+                            if (colKey !== rateKey) next[colKey] = rate;
+                          }
+                          // Mirror option onto identity-like fields when present
+                          for (const key of Object.keys(next)) {
+                            if (key === rateKey || key === "AMOUNT" || key === "AMOUNT") continue;
+                          }
+                          const match = opts.find((o) => o.value === v);
+                          if (match) {
+                            // Prefer filling from full rate-table row when available
+                            const table = src?.customizer?.rateTable || [];
+                            const row = table.find((r) =>
+                              Object.values(r).some(
+                                (x) => String(x ?? "").trim().toLowerCase() === v.toLowerCase(),
+                              ),
+                            );
+                            if (row) {
+                              for (const [k, val] of Object.entries(row)) {
+                                if (String(k).toUpperCase() === "AMOUNT") continue;
+                                next[k] = val;
+                              }
+                            }
+                          }
+                          return next;
+                        });
+                      }}
+                    >
+                      <option value="">Select option…</option>
+                      {opts.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                          {o.rate !== undefined ? ` · ${o.rate}` : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {rateSelect.missingRateTable ? (
           <div
@@ -550,7 +698,6 @@ export function ProductCustomizerEditDialog({
                                   if (value === null || value === undefined || value === "") return "";
                                   const raw = String(value);
                                   if (!u.rateTableDriven) return raw;
-                                  // Map stored identity / sentinel back to option value
                                   const byValue = rateSelect.options.find((o) => o.value === raw);
                                   if (byValue) return byValue.value;
                                   const byCell = rateSelect.options.find(
@@ -575,12 +722,27 @@ export function ProductCustomizerEditDialog({
                                         No rate-table rows — add rows in Spreadsheet product builder
                                       </option>
                                     )
-                                : dropdownOptions.map((opt) => (
-                                    <option key={opt} value={opt}>
-                                      {opt}
-                                      {u.unit ? ` ${u.unit}` : ""}
-                                    </option>
-                                  ))}
+                                : (() => {
+                                    // Linked catalogue product with product list → options for swapping
+                                    const src = u.lookupProductId
+                                      ? state.products.find((p) => p.product_id === u.lookupProductId)
+                                      : undefined;
+                                    const linkedOpts = listProductRateOptions(src);
+                                    if (linkedOpts.length) {
+                                      return linkedOpts.map((opt) => (
+                                        <option key={opt.value} value={opt.value}>
+                                          {opt.label}
+                                          {opt.rate !== undefined ? ` · ${opt.rate}` : ""}
+                                        </option>
+                                      ));
+                                    }
+                                    return dropdownOptions.map((opt) => (
+                                      <option key={opt} value={opt}>
+                                        {opt}
+                                        {u.unit ? ` ${u.unit}` : ""}
+                                      </option>
+                                    ));
+                                  })()}
                             </Select>
                           ) : (
                             <Input

@@ -16,7 +16,10 @@ import { SubProductPicker } from "@/components/sub-product-editor";
 import { applySubProductRates, subProductSelectionCells } from "@/lib/sub-products";
 import {
   applyRateTableRow,
+  listProductRateOptions,
   rateTableSelectOptions,
+  resolveEffectiveRateConfig,
+  resolveRateTableSourceProduct,
 } from "@/lib/rate-table-select";
 
 /* evaluateArithmetic imported from @/lib/formula-eval */
@@ -189,7 +192,18 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
   }
 
   const config = selected?.customizer;
-  const rateSelect = useMemo(() => rateTableSelectOptions(config), [config]);
+  const effectiveConfig = useMemo(
+    () => resolveEffectiveRateConfig(config, products, { preferSource: true }),
+    [config, products],
+  );
+  const rateSourceProduct = useMemo(
+    () => resolveRateTableSourceProduct(config, products),
+    [config, products],
+  );
+  const rateSelect = useMemo(
+    () => rateTableSelectOptions(effectiveConfig),
+    [effectiveConfig],
+  );
 
   // Quoters only: never include sizeLocked columns even if mis-listed in unlocked
   const unlocked = useMemo(() => {
@@ -524,7 +538,9 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
                         {u.unit ? ` (${u.unit})` : ""}
                         {u.rateTableDriven ? (
                           <span className="ml-1 text-[10px] text-forest">
-                            · rows from spreadsheet builder
+                            {rateSourceProduct
+                              ? ` · same table as ${rateSourceProduct.name}`
+                              : " · rows from spreadsheet builder"}
                           </span>
                         ) : null}
                       </label>
@@ -577,12 +593,26 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
                                     No rate-table rows — add rows in Spreadsheet product builder
                                   </option>
                                 )
-                            : dropdownOptions.map((opt) => (
-                                <option key={opt} value={opt}>
-                                  {opt}
-                                  {u.unit ? ` ${u.unit}` : ""}
-                                </option>
-                              ))}
+                            : (() => {
+                                const src = u.lookupProductId
+                                  ? products.find((p) => p.product_id === u.lookupProductId)
+                                  : undefined;
+                                const linkedOpts = listProductRateOptions(src);
+                                if (linkedOpts.length) {
+                                  return linkedOpts.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>
+                                      {opt.label}
+                                      {opt.rate !== undefined ? ` · ${opt.rate}` : ""}
+                                    </option>
+                                  ));
+                                }
+                                return dropdownOptions.map((opt) => (
+                                  <option key={opt} value={opt}>
+                                    {opt}
+                                    {u.unit ? ` ${u.unit}` : ""}
+                                  </option>
+                                ));
+                              })()}
                         </Select>
                       ) : (
                         <Input
