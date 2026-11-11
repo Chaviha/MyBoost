@@ -10,10 +10,14 @@ import { money, uid } from "@/lib/format";
 import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { Product, ProductCustomizerConfig, QuoteLineItem } from "@/lib/types";
 import type { SubColumnDef, SubProduct } from "@/lib/sub-products";
-import { lookupRatesFromProduct } from "@/components/advanced-quotation-calculator";
+import { lookupRatesFromProductDetailed } from "@/components/advanced-quotation-calculator";
 import { applyCatalogueValues, resolveCatalogueLinks } from "@/lib/catalogue-sync";
 import { SubProductPicker } from "@/components/sub-product-editor";
 import { applySubProductRates, subProductSelectionCells } from "@/lib/sub-products";
+import {
+  applyRateTableRow,
+  rateTableSelectOptions,
+} from "@/lib/rate-table-select";
 
 /* evaluateArithmetic imported from @/lib/formula-eval */
 
@@ -175,7 +179,7 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
     // Catalogue columns carry the linked product's synced price, not its id
     setCells(
       applySubProductRates(
-        applyCatalogueValues(nextCells, resolveCatalogueLinks(p.customizer, products), products),
+        applyCatalogueValues(nextCells, resolveCatalogueLinks(p.customizer, products), products, p.customizer?.catalogueVariants),
         p.customizer?.columns,
         products,
         p.customizer?.catalogueRateKey || "RATE",
@@ -185,29 +189,65 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
   }
 
   const config = selected?.customizer;
+  const rateSelect = useMemo(() => rateTableSelectOptions(config), [config]);
+
   // Quoters only: never include sizeLocked columns even if mis-listed in unlocked
-  const unlocked = (config?.unlocked || [])
-    .filter((u) => {
-      const col = config?.columns?.find((c) => c.key === u.key);
-      const colType = col?.type === "size" ? "dropdown" : col?.type;
-      if (colType === "dropdown" && col?.sizeLocked) return false;
-      if (col && col.editableByQuoter === false) return false;
-      return true;
-    })
-    .map((u) => {
-      const col = config?.columns?.find((c) => c.key === u.key);
-      const type = u.type === "size" ? "dropdown" : u.type;
-      return {
-        ...u,
-        type,
-        options: (u.options ?? col?.options)?.map(String),
-        lookupProductId: (u as { lookupProductId?: string }).lookupProductId ?? col?.lookupProductId,
-        lookupMatchKey: (u as { lookupMatchKey?: string }).lookupMatchKey ?? col?.lookupMatchKey,
-        lookupFillKeys: (u as { lookupFillKeys?: string[] }).lookupFillKeys ?? col?.lookupFillKeys,
-        subProducts: (u as { subProducts?: SubProduct[] }).subProducts ?? col?.subProducts,
-        subColumns: (u as { subColumns?: SubColumnDef[] }).subColumns ?? col?.subColumns,
-      };
-    });
+  const unlocked = useMemo(() => {
+    const base = (config?.unlocked || [])
+      .filter((u) => {
+        const col = config?.columns?.find((c) => c.key === u.key);
+        const colType = col?.type === "size" ? "dropdown" : col?.type;
+        if (colType === "dropdown" && col?.sizeLocked) return false;
+        if (col && col.editableByQuoter === false) return false;
+        return true;
+      })
+      .map((u) => {
+        const col = config?.columns?.find((c) => c.key === u.key);
+        const type = u.type === "size" ? "dropdown" : u.type;
+        return {
+          ...u,
+          type,
+          options: (u.options ?? col?.options)?.map(String) || [],
+          lookupProductId: (u as { lookupProductId?: string }).lookupProductId ?? col?.lookupProductId,
+          lookupMatchKey: (u as { lookupMatchKey?: string }).lookupMatchKey ?? col?.lookupMatchKey,
+          lookupFillKeys: (u as { lookupFillKeys?: string[] }).lookupFillKeys ?? col?.lookupFillKeys,
+          subProducts: (u as { subProducts?: SubProduct[] }).subProducts ?? col?.subProducts,
+          subColumns: (u as { subColumns?: SubColumnDef[] }).subColumns ?? col?.subColumns,
+          rateTableDriven: false as boolean,
+        };
+      });
+
+    // Auto first-column dropdown from spreadsheet builder rate-table rows
+    if (rateSelect.key && rateSelect.options.length) {
+      const optValues = rateSelect.options.map((o) => o.value);
+      const idx = base.findIndex((f) => f.key === rateSelect.key);
+      if (idx >= 0) {
+        const existing = base[idx];
+        base[idx] = {
+          ...existing,
+          type: "dropdown",
+          options: optValues,
+          rateTableDriven: true,
+          label: existing.label || rateSelect.key,
+        };
+        if (idx > 0) {
+          const [item] = base.splice(idx, 1);
+          base.unshift(item);
+        }
+      } else {
+        const col = config?.columns?.find((c) => c.key === rateSelect.key);
+        base.unshift({
+          key: rateSelect.key,
+          label: col?.label || rateSelect.key,
+          type: "dropdown",
+          unit: col?.unit,
+          options: optValues,
+          rateTableDriven: true,
+        } as (typeof base)[number]);
+      }
+    }
+    return base;
+  }, [config, rateSelect]);
 
   const computed = useMemo(() => {
     if (!config) return { cells, total: 0, error: undefined as string | undefined };
@@ -216,9 +256,39 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
 
   function updateField(key: string, value: string | number | null) {
     setCells((c) => {
-      const next: Record<string, string | number | null> = { ...c, [key]: value };
+      let next: Record<string, string | number | null> = { ...c, [key]: value };
       const field = unlocked.find((u) => u.key === key);
       const col = config?.columns?.find((x) => x.key === key);
+
+      // Spreadsheet builder row selected → fill associated cells from that rate-table row
+      if (field?.rateTableDriven && value) {
+        if (rateSelect.missingRateTable || !rateSelect.options.length) {
+          toast.error(
+            "No rate table on this product. Open Spreadsheet product builder, add at least one row, and save.",
+          );
+        } else {
+          const raw = String(value);
+          const match =
+            rateSelect.options.find((o) => o.value === raw) ||
+            rateSelect.options.find((o) => String(o.row[key] ?? "").trim() === raw) ||
+            rateSelect.options.find((o) => o.label === raw);
+          if (match) {
+            next = applyRateTableRow(next, match.row, config);
+            if (rateSelect.key) {
+              const identity = match.row[rateSelect.key];
+              next[rateSelect.key] =
+                identity !== undefined && identity !== null && String(identity).trim() !== ""
+                  ? identity
+                  : match.label;
+            }
+          } else {
+            toast.error(
+              `No rate-table row matches “${raw}”. Add that row in the Spreadsheet product builder and save.`,
+            );
+          }
+        }
+      }
+
       if (field?.type === "subproduct" || col?.type === "subproduct") {
         const unitKey = config?.columns?.find((x) => x.key.toUpperCase() === "UNIT")?.key;
         Object.assign(
@@ -239,15 +309,23 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
         );
       }
       const lookupProductId = field?.lookupProductId ?? col?.lookupProductId;
-      if ((field?.type === "dropdown" || col?.type === "dropdown") && lookupProductId && value) {
+      if ((field?.type === "dropdown" || col?.type === "dropdown") && lookupProductId && value && !field?.rateTableDriven) {
         const source = products.find((p) => p.product_id === lookupProductId);
         const fillKeys =
           field?.lookupFillKeys?.length || col?.lookupFillKeys?.length
             ? field?.lookupFillKeys || col?.lookupFillKeys || []
             : ["RATE", "DENSITY"];
         const matchKey = field?.lookupMatchKey || col?.lookupMatchKey || key;
-        const filled = lookupRatesFromProduct(source, String(value), matchKey, fillKeys);
-        for (const [srcKey, srcVal] of Object.entries(filled)) {
+        const lookup = lookupRatesFromProductDetailed(
+          source,
+          String(value),
+          matchKey,
+          fillKeys,
+        );
+        if (lookup.error) {
+          toast.error(lookup.error);
+        }
+        for (const [srcKey, srcVal] of Object.entries(lookup.values)) {
           const target =
             config?.columns?.find((x) => x.key.toUpperCase() === srcKey.toUpperCase())?.key ||
             unlocked.find((x) => x.key.toUpperCase() === srcKey.toUpperCase())?.key ||
@@ -409,10 +487,24 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
               <div>
                 <p className="text-sm font-semibold">{selected.name}</p>
                 <p className="text-xs text-ink-muted">
-                  Edit unlocked fields for this quote only. Locked sizes stay fixed.
+                  Edit unlocked fields for this quote only. Locked sizes stay fixed. Choose a
+                  spreadsheet row from the first dropdown to load its rates and sizes.
                 </p>
               </div>
             </div>
+
+            {rateSelect.missingRateTable ? (
+              <div
+                role="alert"
+                className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+              >
+                <p className="font-medium">Rate table missing</p>
+                <p className="mt-0.5 text-xs text-amber-800">
+                  This product has no spreadsheet rate-table rows. Open Spreadsheet product builder,
+                  add at least one row, and save — then the variant dropdown will appear here.
+                </p>
+              </div>
+            ) : null}
 
             {unlocked.length === 0 ? (
               <p className="text-xs text-ink-muted">
@@ -430,6 +522,11 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
                       <label className="mb-1 block text-xs text-ink-muted">
                         {u.label}
                         {u.unit ? ` (${u.unit})` : ""}
+                        {u.rateTableDriven ? (
+                          <span className="ml-1 text-[10px] text-forest">
+                            · rows from spreadsheet builder
+                          </span>
+                        ) : null}
                       </label>
                       {u.type === "subproduct" ? (
                         <SubProductPicker
@@ -451,16 +548,41 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
                       ) : isDropdown ? (
                         <Select
                           className="h-9"
-                          value={value === null || value === undefined ? "" : String(value)}
+                          value={
+                            (() => {
+                              if (value === null || value === undefined || value === "") return "";
+                              const raw = String(value);
+                              if (!u.rateTableDriven) return raw;
+                              const byValue = rateSelect.options.find((o) => o.value === raw);
+                              if (byValue) return byValue.value;
+                              const byCell = rateSelect.options.find(
+                                (o) => String(o.row[u.key] ?? "").trim() === raw,
+                              );
+                              if (byCell) return byCell.value;
+                              return raw;
+                            })()
+                          }
                           onChange={(e) => updateField(u.key, e.target.value)}
                         >
                           <option value="">Select…</option>
-                          {dropdownOptions.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                              {u.unit ? ` ${u.unit}` : ""}
-                            </option>
-                          ))}
+                          {u.rateTableDriven
+                            ? rateSelect.options.length
+                              ? rateSelect.options.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))
+                              : (
+                                  <option value="" disabled>
+                                    No rate-table rows — add rows in Spreadsheet product builder
+                                  </option>
+                                )
+                            : dropdownOptions.map((opt) => (
+                                <option key={opt} value={opt}>
+                                  {opt}
+                                  {u.unit ? ` ${u.unit}` : ""}
+                                </option>
+                              ))}
                         </Select>
                       ) : (
                         <Input

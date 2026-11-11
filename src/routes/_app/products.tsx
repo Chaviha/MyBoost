@@ -675,6 +675,8 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   sku?: string;
                   category?: string;
                   unlocked?: Array<{ key: string; label: string; type: string; unit?: string }>;
+                  batchIndex?: number;
+                  batchCount?: number;
                 };
                 const cat = businessCategories.find((c) => c.category_id === activeCategoryId);
                 const rows = (payload.meta as {
@@ -699,6 +701,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   lookupProductId: c.lookupProductId,
                   lookupMatchKey: c.lookupMatchKey,
                   lookupFillKeys: c.lookupFillKeys,
+                  lookupOption: c.lookupOption,
                   subProducts: c.subProducts,
                   subColumns: c.subColumns,
                 }));
@@ -728,10 +731,13 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                     catalogueRateKey:
                       (payload.meta as { catalogueRateKey?: string }).catalogueRateKey || "RATE",
                     catalogueLinks: (payload.meta as { catalogueLinks?: Record<string, string> }).catalogueLinks,
+                    catalogueVariants: (payload.meta as { catalogueVariants?: Record<string, string> }).catalogueVariants,
                   },
                 });
-                if (productId) {
-                  toast.success(`“${payload.description}” saved to catalogue.`);
+                // Multi-row save: one product per row; close dialog after the last in the batch
+                const batchCount = meta.batchCount ?? 1;
+                const batchIndex = meta.batchIndex ?? 0;
+                if (productId && batchIndex >= batchCount - 1) {
                   setBuilderOpen(false);
                 }
               }}
@@ -908,6 +914,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                       lookupProductId: c.lookupProductId,
                       lookupMatchKey: c.lookupMatchKey,
                       lookupFillKeys: c.lookupFillKeys,
+                      lookupOption: (c as { lookupOption?: string }).lookupOption,
                       subProducts: c.subProducts,
                       subColumns: c.subColumns,
                     })),
@@ -920,6 +927,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                     catalogueRateKey:
                       (meta as { catalogueRateKey?: string }).catalogueRateKey || "RATE",
                     catalogueLinks: (meta as { catalogueLinks?: Record<string, string> }).catalogueLinks,
+                    catalogueVariants: (meta as { catalogueVariants?: Record<string, string> }).catalogueVariants,
                   },
                   reference_product_id: (meta as { catalogueProductId?: string }).catalogueProductId,
                 });
@@ -933,11 +941,15 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
       {customizerEditId && businessProducts.some((x) => x.product_id === customizerEditId) ? (
         <ProductCustomizerEditDialog
           product={businessProducts.find((x) => x.product_id === customizerEditId)!}
+          products={businessProducts.filter(
+            (x) => x.customizer?.columns?.length || x.customizer?.unlocked?.length,
+          )}
           open
           creatorMode
           onOpenChange={(v) => {
             if (!v) setCustomizerEditId(null);
           }}
+          onSelectProduct={(id) => setCustomizerEditId(id)}
           onSave={(patch) => {
             updateProduct(customizerEditId, patch);
           }}

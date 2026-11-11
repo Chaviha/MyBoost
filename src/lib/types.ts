@@ -384,6 +384,11 @@ export type ProductCustomizerColumn = {
   lookupMatchKey?: string;
   /** Column keys to copy from the matched source row into this product’s cells (e.g. RATE, DENSITY). */
   lookupFillKeys?: string[];
+  /**
+   * Optional fixed rate-table option on the linked lookup product (e.g. "MS").
+   * When set, catalogue/rate sync uses that specific dropdown row, not only the product.
+   */
+  lookupOption?: string;
   /** Sub-products column: products nested inside this product (tree → one dropdown per layer). */
   subProducts?: SubProduct[];
   /** The sub-product grid's own columns (text / number / formula / catalogue). */
@@ -428,6 +433,11 @@ export type ProductCustomizerConfig = {
    * synced selling price (a number); the id is kept here so the value can stay in sync.
    */
   catalogueLinks?: Record<string, string>;
+  /**
+   * Catalogue columns: columnKey → specific rate-table / dropdown option on the linked product
+   * (e.g. "MS", "GI"). When set, sync uses that row’s RATE from the source product’s rate table.
+   */
+  catalogueVariants?: Record<string, string>;
 };
 
 /**

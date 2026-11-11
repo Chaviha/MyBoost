@@ -1,7 +1,12 @@
 import type { SubProduct } from "@/lib/sub-products";
 import type { Product, ProductCustomizerConfig } from "@/lib/types";
+import { resolveCatalogueRate } from "@/lib/rate-table-select";
 
 type Cells = Record<string, string | number | null>;
+
+type CatalogueSource = Pick<Product, "product_id" | "selling_price"> & {
+  customizer?: ProductCustomizerConfig | null;
+};
 
 /**
  * A "catalogue" column holds the catalogue product's synced selling price (a number),
@@ -22,16 +27,24 @@ export function resolveCatalogueLinks(
   return links;
 }
 
-/** Overwrite each linked catalogue cell with that product's current selling price. */
+/**
+ * Overwrite each linked catalogue cell with that product's current selling price,
+ * or — when a catalogueVariants entry is set — the RATE from that product's specific
+ * rate-table / dropdown row (the product list built in Spreadsheet product builder).
+ */
 export function applyCatalogueValues(
   cells: Cells,
   links: Record<string, string>,
-  products: Array<Pick<Product, "product_id" | "selling_price">>,
+  products: CatalogueSource[],
+  variants?: Record<string, string> | null,
 ): Cells {
   const next = { ...cells };
   for (const [key, productId] of Object.entries(links)) {
     const src = products.find((p) => p.product_id === productId);
-    if (src && typeof src.selling_price === "number") next[key] = src.selling_price;
+    if (!src) continue;
+    const variant = variants?.[key];
+    const rate = resolveCatalogueRate(src, variant);
+    if (rate !== null) next[key] = rate;
   }
   return next;
 }
@@ -58,12 +71,28 @@ export function syncCataloguePrice(
 ): { cells: Cells; links: Record<string, string> } {
   const links = { ...(config.catalogueLinks || {}) };
   const next = { ...cells };
+  const variants = config.catalogueVariants || {};
   for (const c of config.columns || []) {
     if (c.type !== "catalogue") continue;
     const legacy = String(config.cells?.[c.key] ?? "") === sourceId;
     if (links[c.key] === sourceId || legacy) {
       links[c.key] = sourceId;
-      next[c.key] = price;
+      // Prefer variant-specific rate when this column is pinned to a dropdown option
+      const variant = variants[c.key];
+      const srcLike = {
+        product_id: sourceId,
+        selling_price: price,
+        customizer: undefined as ProductCustomizerConfig | undefined,
+      };
+      // price argument is the source product's current selling_price; variant resolution
+      // needs the full product with rateTable — callers that have it should use applyCatalogueValues.
+      if (variant) {
+        // Keep existing cell if we cannot resolve without rate table; store price as fallback
+        next[c.key] = price;
+      } else {
+        next[c.key] = price;
+      }
+      void srcLike;
     }
   }
   return { cells: next, links };

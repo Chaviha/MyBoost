@@ -25,6 +25,7 @@ import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { MarketplaceProduct, QuoteLineItem, Product } from "@/lib/types";
 import { useLife } from "@/lib/store";
 import { applyCatalogueValues } from "@/lib/catalogue-sync";
+import { listProductRateOptions, resolveCatalogueRate } from "@/lib/rate-table-select";
 import { SubProductEditor, SubProductPicker } from "@/components/sub-product-editor";
 import {
   applySubProductRates,
@@ -58,6 +59,8 @@ export type CalcColumn = {
   lookupMatchKey?: string;
   /** Keys to copy from the matched source row (e.g. RATE, DENSITY). */
   lookupFillKeys?: string[];
+  /** Fixed rate-table option on the linked product (product + specific dropdown). */
+  lookupOption?: string;
   /** Sub-products column: products nested inside this product (one dropdown per layer). */
   subProducts?: SubProduct[];
   /** Sub-products column: the grid's own columns (text / number / formula / catalogue). */
@@ -82,35 +85,76 @@ function normalizeOptions(options?: (string | number)[] | null): string[] | unde
  * Look up RATE / DENSITY (or other fields) from a source product’s rate table
  * by matching the selected dropdown value (e.g. MS → rate row for MS).
  */
-export function lookupRatesFromProduct(
-  sourceProduct:
-    | {
-        customizer?: {
-          rateTable?: Array<Record<string, string | number | null>>;
-          cells?: Record<string, string | number | null>;
-          columns?: Array<{ key: string; type?: string; options?: string[] }>;
-        } | null;
-        specs?: Record<string, string | number>;
-        selling_price?: number;
-      }
-    | null
-    | undefined,
+export type RateLookupResult = {
+  values: Record<string, string | number | null>;
+  /** True when the source product has no rate table and no primary cells to fall back on. */
+  missingRateTable?: boolean;
+  /** True when a rate table exists but no row matched the selected value. */
+  noMatchingRow?: boolean;
+  /** Human-readable message for toasts / UI. */
+  error?: string;
+};
+
+type RateLookupSource =
+  | {
+      name?: string;
+      customizer?: {
+        rateTable?: Array<Record<string, string | number | null>>;
+        cells?: Record<string, string | number | null>;
+        columns?: Array<{ key: string; type?: string; options?: string[] }>;
+      } | null;
+      specs?: Record<string, string | number>;
+      selling_price?: number;
+    }
+  | null
+  | undefined;
+
+/**
+ * Look up RATE / DENSITY (or other fields) from a source product’s rate table
+ * by matching the selected dropdown value. Returns values plus error flags when
+ * the rate table is missing or the selection does not match any row.
+ */
+export function lookupRatesFromProductDetailed(
+  sourceProduct: RateLookupSource,
   selectedValue: string,
   matchKey: string,
   fillKeys: string[],
-): Record<string, string | number | null> {
+): RateLookupResult {
   const result: Record<string, string | number | null> = {};
-  if (!sourceProduct || !selectedValue || !fillKeys.length) return result;
+  if (!selectedValue || !fillKeys.length) {
+    return { values: result };
+  }
+  if (!sourceProduct) {
+    return {
+      values: result,
+      missingRateTable: true,
+      error: "No source product linked for rate lookup.",
+    };
+  }
 
   const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
   const want = norm(selectedValue);
+  const productLabel = sourceProduct.name ? `“${sourceProduct.name}”` : "the linked product";
+
+  const hasRateTable = Boolean(sourceProduct.customizer?.rateTable?.length);
+  const hasCells = Boolean(
+    sourceProduct.customizer?.cells && Object.keys(sourceProduct.customizer.cells).length,
+  );
 
   const table =
-    sourceProduct.customizer?.rateTable?.length
-      ? sourceProduct.customizer.rateTable
-      : sourceProduct.customizer?.cells
-        ? [sourceProduct.customizer.cells]
+    hasRateTable
+      ? sourceProduct.customizer!.rateTable!
+      : hasCells
+        ? [sourceProduct.customizer!.cells!]
         : [];
+
+  if (!table.length) {
+    return {
+      values: result,
+      missingRateTable: true,
+      error: `No rate table on ${productLabel}. Open it in the Spreadsheet product builder, add at least one row, and save.`,
+    };
+  }
 
   const matchKeys = [
     matchKey,
@@ -123,6 +167,8 @@ export function lookupRatesFromProduct(
     "Option",
     "TYPE",
     "Type",
+    "DESCRIPTION",
+    "Description",
   ].filter(Boolean);
 
   const row = table.find((r) =>
@@ -139,11 +185,12 @@ export function lookupRatesFromProduct(
         }
       }
     }
-    return result;
+    return { values: result };
   }
 
   // Fallback: specs on the source product (e.g. density_ms)
   const specs = sourceProduct.specs || {};
+  let filledFromSpecs = false;
   for (const key of fillKeys) {
     const candidates = [
       specs[`${key}_${selectedValue}`],
@@ -156,11 +203,32 @@ export function lookupRatesFromProduct(
     for (const c of candidates) {
       if (c !== undefined && c !== null && c !== "") {
         result[key] = c;
+        filledFromSpecs = true;
         break;
       }
     }
   }
-  return result;
+  if (filledFromSpecs) {
+    return { values: result };
+  }
+
+  return {
+    values: result,
+    noMatchingRow: true,
+    error: hasRateTable
+      ? `No rate-table row on ${productLabel} matches “${selectedValue}”. Add that option as a row in the Spreadsheet product builder and save.`
+      : `Could not resolve rates for “${selectedValue}” on ${productLabel}.`,
+  };
+}
+
+/** Convenience wrapper — returns only the filled cell values (existing callers). */
+export function lookupRatesFromProduct(
+  sourceProduct: RateLookupSource,
+  selectedValue: string,
+  matchKey: string,
+  fillKeys: string[],
+): Record<string, string | number | null> {
+  return lookupRatesFromProductDetailed(sourceProduct, selectedValue, matchKey, fillKeys).values;
 }
 
 export type CalcCellValue = string | number | null;
@@ -174,6 +242,8 @@ export type CalcRow = {
   catalogueProductId?: string;
   /** Catalogue column key → linked product_id. The cell itself holds the synced price, not the id. */
   catalogueLinks?: Record<string, string>;
+  /** Catalogue column key → specific rate-table option on the linked product (product + dropdown). */
+  catalogueVariants?: Record<string, string>;
 };
 
 function slugKey(label: string, existing: string[]): string {
@@ -261,12 +331,12 @@ function defaultColumns(): CalcColumn[] {
   ];
 }
 
-/** Rebuild the grid (columns + primary row) from a product that was saved with the spreadsheet builder. */
-function seedFromProduct(product?: Product): { columns: CalcColumn[]; row: CalcRow } {
+/** Rebuild the grid (columns + rows) from a product that was saved with the spreadsheet builder. */
+function seedFromProduct(product?: Product): { columns: CalcColumn[]; rows: CalcRow[] } {
   const saved = product?.customizer;
   if (!saved?.columns?.length) {
     const columns = defaultColumns();
-    return { columns, row: newRow(columns) };
+    return { columns, rows: [newRow(columns)] };
   }
   const columns: CalcColumn[] = saved.columns.map((c) => ({
     id: uid("COL"),
@@ -281,6 +351,7 @@ function seedFromProduct(product?: Product): { columns: CalcColumn[]; row: CalcR
     lookupProductId: (c as { lookupProductId?: string }).lookupProductId,
     lookupMatchKey: (c as { lookupMatchKey?: string }).lookupMatchKey,
     lookupFillKeys: (c as { lookupFillKeys?: string[] }).lookupFillKeys,
+    lookupOption: (c as { lookupOption?: string }).lookupOption,
     subProducts: (c as { subProducts?: SubProduct[] }).subProducts,
     subColumns:
       (c as { subColumns?: SubColumnDef[] }).subColumns ??
@@ -302,24 +373,44 @@ function seedFromProduct(product?: Product): { columns: CalcColumn[]; row: CalcR
   }
   // Catalogue columns: keep the id link separately; the cell holds the synced price.
   const catalogueLinks: Record<string, string> = { ...(saved.catalogueLinks || {}) };
-  const seededCells = { ...base.cells, ...(saved.cells || {}) };
-  for (const c of saved.columns || []) {
-    if (c.type !== "catalogue") continue;
-    const raw = String(seededCells[c.key] ?? "");
-    if (!catalogueLinks[c.key] && raw && Number.isNaN(Number(raw))) {
-      catalogueLinks[c.key] = raw; // legacy save: cell held the product id
+
+  type SavedRow = {
+    cells?: Record<string, string | number | null>;
+    formulas?: Record<string, string>;
+    catalogueProductId?: string;
+    catalogueLinks?: Record<string, string>;
+  };
+  const savedRows: SavedRow[] =
+    Array.isArray((saved as { rows?: SavedRow[] }).rows) && (saved as { rows?: SavedRow[] }).rows!.length
+      ? (saved as { rows?: SavedRow[] }).rows!
+      : saved.rateTable?.length
+        ? saved.rateTable.map((cells) => ({ cells, formulas: saved.formulas }))
+        : [{ cells: saved.cells || {}, formulas: saved.formulas }];
+
+  const rows: CalcRow[] = savedRows.map((sr) => {
+    const seededCells = { ...base.cells, ...(sr.cells || {}) };
+    const rowLinks = { ...catalogueLinks, ...(sr.catalogueLinks || {}) };
+    for (const c of saved.columns || []) {
+      if (c.type !== "catalogue") continue;
+      const raw = String(seededCells[c.key] ?? "");
+      if (!rowLinks[c.key] && raw && Number.isNaN(Number(raw))) {
+        rowLinks[c.key] = raw;
+      }
+      if (rowLinks[c.key] && typeof seededCells[c.key] !== "number") seededCells[c.key] = 0;
     }
-    if (catalogueLinks[c.key] && typeof seededCells[c.key] !== "number") seededCells[c.key] = 0;
-  }
+    return {
+      ...base,
+      id: uid("ROW"),
+      cells: seededCells,
+      formulas: { ...(base.formulas || {}), ...(sr.formulas || {}), ...(saved.formulas || {}) },
+      catalogueProductId: sr.catalogueProductId || catalogueProductId,
+      catalogueLinks: rowLinks,
+    };
+  });
+
   return {
     columns,
-    row: {
-      ...base,
-      cells: seededCells,
-      formulas: { ...(base.formulas || {}), ...(saved.formulas || {}) },
-      catalogueProductId,
-      catalogueLinks,
-    },
+    rows: rows.length ? rows : [base],
   };
 }
 
@@ -392,7 +483,7 @@ export function AdvancedQuotationCalculator({
   }, [products, state.products, selectedBusiness?.business_id]);
   const [seed] = useState(() => seedFromProduct(initialProduct));
   const [columns, setColumns] = useState<CalcColumn[]>(seed.columns);
-  const [rows, setRows] = useState<CalcRow[]>(() => [seed.row]);
+  const [rows, setRows] = useState<CalcRow[]>(() => seed.rows);
   const [showColumnEditor, setShowColumnEditor] = useState(true); // open columns by default so dropdown product link is visible
   /** Text for the next dropdown choice being typed (one at a time — no commas needed). */
   const [newOptionText, setNewOptionText] = useState<Record<string, string>>({});
@@ -496,7 +587,8 @@ export function AdvancedQuotationCalculator({
           const synced = applyCatalogueValues(
             r.cells,
             r.catalogueLinks,
-            catalogueProducts as Array<Pick<Product, "product_id" | "selling_price">>,
+            catalogueProducts as Array<Pick<Product, "product_id" | "selling_price"> & { customizer?: Product["customizer"] }>,
+            r.catalogueVariants,
           );
           if (Object.keys(r.catalogueLinks).some((k) => synced[k] !== r.cells[k])) {
             changed = true;
@@ -567,14 +659,17 @@ export function AdvancedQuotationCalculator({
                     columns.some((c) => c.key.toUpperCase() === k.toUpperCase()),
                   );
             const matchKey = col.lookupMatchKey || col.key;
-            const filled = lookupRatesFromProduct(
+            const lookup = lookupRatesFromProductDetailed(
               source,
               String(value),
               matchKey,
               fillKeys.length ? fillKeys : ["RATE", "DENSITY"],
             );
+            if (lookup.error) {
+              toast.error(lookup.error);
+            }
             // Map filled keys onto this product’s actual column keys (case-insensitive)
-            for (const [srcKey, srcVal] of Object.entries(filled)) {
+            for (const [srcKey, srcVal] of Object.entries(lookup.values)) {
               const target =
                 columns.find((c) => c.key.toUpperCase() === srcKey.toUpperCase())?.key || srcKey;
               cells[target] = srcVal;
@@ -702,7 +797,12 @@ export function AdvancedQuotationCalculator({
     setAdded(false);
   }
 
-  function pickCatalogue(rowId: string, colKey: string, product: MarketplaceProduct | Product) {
+  function pickCatalogue(
+    rowId: string,
+    colKey: string,
+    product: MarketplaceProduct | Product,
+    variant?: string,
+  ) {
     const productId =
       "product_id" in product && product.product_id
         ? String(product.product_id)
@@ -714,20 +814,32 @@ export function AdvancedQuotationCalculator({
       columns.find((c) => c.key === "RATE")?.key ||
       columns.find((c) => c.type === "number" && c.key !== "QTY")?.key;
     const unitKey = columns.find((c) => c.key === "UNIT")?.key;
+    const resolved = resolveCatalogueRate(
+      product as { customizer?: Product["customizer"]; selling_price?: number },
+      variant,
+    );
+    const price = resolved !== null ? resolved : Number(product.selling_price) || 0;
 
     setRows((current) =>
       current.map((r) => {
         if (r.id !== rowId) return r;
         const cells = { ...r.cells };
-        if (descKey) cells[descKey] = product.name;
-        if (rateKey) cells[rateKey] = Number(product.selling_price) || 0;
+        if (descKey) {
+          cells[descKey] = variant
+            ? `${product.name} · ${variant}`
+            : product.name;
+        }
+        if (rateKey) cells[rateKey] = price;
         if (unitKey) cells[unitKey] = product.unit || "item";
-        // The catalogue column gets the product's synced PRICE (not its id/link);
+        // The catalogue column gets the synced PRICE (product or specific rate-table row);
         // the id is kept in catalogueLinks so the value follows future price changes.
         const links = { ...(r.catalogueLinks || {}) };
-        cells[colKey] = Number(product.selling_price) || 0;
+        const variants = { ...(r.catalogueVariants || {}) };
+        cells[colKey] = price;
         if (productId) links[colKey] = productId;
         else delete links[colKey];
+        if (variant && String(variant).trim()) variants[colKey] = String(variant).trim();
+        else delete variants[colKey];
         for (const col of columns) {
           if (col.type === "dropdown" && product.specs) {
             const match = Object.entries(product.specs).find(
@@ -738,11 +850,23 @@ export function AdvancedQuotationCalculator({
             if (match) cells[col.key] = String(match[1]);
           }
         }
+        // When a specific rate-table option is chosen, mirror it onto matching dropdown columns
+        if (variant) {
+          for (const col of columns) {
+            if (col.type === "dropdown" && !col.lookupProductId) {
+              const opts = col.options || [];
+              if (opts.some((o) => String(o).toLowerCase() === String(variant).toLowerCase())) {
+                cells[col.key] = variant;
+              }
+            }
+          }
+        }
         return {
           ...r,
           cells,
           catalogueProductId: productId,
           catalogueLinks: links,
+          catalogueVariants: variants,
         };
       }),
     );
@@ -750,7 +874,9 @@ export function AdvancedQuotationCalculator({
     setAdded(false);
     toast.success(
       productId
-        ? `Linked “${product.name}” — price will stay in sync with the catalogue`
+        ? variant
+          ? `Linked “${product.name}” · ${variant} — syncs product + that dropdown row`
+          : `Linked “${product.name}” — price will stay in sync with the catalogue`
         : `Linked “${product.name}”`,
     );
   }
@@ -812,24 +938,6 @@ export function AdvancedQuotationCalculator({
     if (invalid) return toast.error("Fix formula errors first.");
     if (!calculated.length) return toast.error("Add at least one row.");
 
-    const primary = calculated[0];
-    const description =
-      localProductName.trim() ||
-      productName ||
-      String(primary.cells.DESCRIPTION ?? "").trim() ||
-      "Custom product";
-    if (!description.trim()) return toast.error("Enter a product name.");
-    const unit = localUnit.trim() || String(primary.cells.UNIT ?? "item");
-    const cost = total;
-    const specs: Record<string, string | number> = {};
-    for (const col of columns) {
-      if (col.type === "formula") continue;
-      if (col.key === "DESCRIPTION" || col.key === "UNIT") continue;
-      const v = primary.cells[col.key];
-      if (v !== null && v !== "" && v !== undefined) {
-        specs[col.key.toLowerCase()] = v as string | number;
-      }
-    }
     // Store which fields stay unlocked for later editing
     const unlocked = columns
       .filter((c) => c.editableByQuoter && !(c.type === "dropdown" && c.sizeLocked) && c.type !== "formula")
@@ -845,65 +953,156 @@ export function AdvancedQuotationCalculator({
         subProducts: c.subProducts,
         subColumns: c.subColumns,
       }));
-    onAddToProduct({
-      description,
-      unit,
-      cost_price: cost,
-      selling_price: cost,
-      customizer_shared: shareAcrossBusinesses,
-      specs,
-      meta: {
-        calculator: "advanced-spreadsheet",
-        // Persist full column defs so creators can reopen and edit locked / non-editable fields
-        columns: columns.map((c) => ({
-          key: c.key,
-          label: c.label,
-          type: c.type,
-          formula: c.formula,
-          editableByQuoter: !!c.editableByQuoter,
-          unit: c.unit,
-          sizeLocked: !!c.sizeLocked,
-          options: c.options,
-          lookupProductId: c.lookupProductId,
-          lookupMatchKey: c.lookupMatchKey,
-          lookupFillKeys: c.lookupFillKeys,
-          subProducts: c.subProducts,
-          subColumns: c.subColumns,
-        })),
-        // All grid rows → rate table for other products to look up MS/GI/etc. rates
-        rateTable: calculated.map((r) => ({ ...r.cells })),
-        rows: calculated.map((r) => ({
-          cells: r.cells,
-          formulas: r.formulas,
-          amount: r.amount,
-          catalogueProductId: r.catalogueProductId,
+
+    const columnMeta = columns.map((c) => ({
+      key: c.key,
+      label: c.label,
+      type: c.type,
+      formula: c.formula,
+      editableByQuoter: !!c.editableByQuoter,
+      unit: c.unit,
+      sizeLocked: !!c.sizeLocked,
+      options: c.options,
+      lookupProductId: c.lookupProductId,
+      lookupMatchKey: c.lookupMatchKey,
+      lookupFillKeys: c.lookupFillKeys,
+      lookupOption: c.lookupOption,
+      subProducts: c.subProducts,
+      subColumns: c.subColumns,
+    }));
+
+    const catalogueRateKey =
+      columns.find((c) => c.key === "RATE")?.key ||
+      columns.find((c) => c.type === "number" && c.key !== "QTY")?.key ||
+      "RATE";
+
+    const descKey =
+      columns.find((c) => c.key === "DESCRIPTION")?.key ||
+      columns.find((c) => c.type === "text")?.key;
+
+    const unitKey = columns.find((c) => c.key === "UNIT")?.key;
+
+    function resolveCatalogueId(r: (typeof calculated)[number]) {
+      if (r.catalogueProductId) return r.catalogueProductId;
+      for (const col of columns) {
+        if (col.type !== "catalogue") continue;
+        const v = String(r.cells[col.key] || "");
+        if (v && catalogueProducts.some((p) => p.product_id === v)) return v;
+      }
+      return undefined;
+    }
+
+    /** One catalogue product payload from a single grid row (final product on that row). */
+    function payloadForRow(
+      r: (typeof calculated)[number],
+      index: number,
+      batchCount: number,
+      /** When editing, persist the full multi-row grid on the product. */
+      persistAllRows: boolean,
+    ) {
+      const rowName = String(r.cells[descKey || "DESCRIPTION"] ?? "").trim();
+      const baseName = localProductName.trim() || productName || "";
+      const description =
+        (persistAllRows ? baseName || rowName : rowName || (batchCount > 1 && baseName ? `${baseName} (${index + 1})` : baseName)) ||
+        `Custom product ${index + 1}`;
+      const unit =
+        localUnit.trim() ||
+        String((unitKey ? r.cells[unitKey] : r.cells.UNIT) ?? "item") ||
+        "item";
+      const cost = persistAllRows ? total : Number(r.amount) || 0;
+      const specs: Record<string, string | number> = {};
+      for (const col of columns) {
+        if (col.type === "formula") continue;
+        if (col.key === "DESCRIPTION" || col.key === "UNIT") continue;
+        const v = r.cells[col.key];
+        if (v !== null && v !== "" && v !== undefined) {
+          specs[col.key.toLowerCase()] = v as string | number;
+        }
+      }
+      const sku =
+        !persistAllRows && batchCount > 1 && localSku.trim()
+          ? `${localSku.trim()}-${index + 1}`
+          : localSku.trim();
+      const rowList = persistAllRows
+        ? calculated.map((row) => ({
+            cells: row.cells,
+            formulas: row.formulas,
+            amount: row.amount,
+            catalogueProductId: row.catalogueProductId,
+            catalogueLinks: row.catalogueLinks,
+          }))
+        : [
+            {
+              cells: r.cells,
+              formulas: r.formulas,
+              amount: r.amount,
+              catalogueProductId: r.catalogueProductId,
+              catalogueLinks: r.catalogueLinks,
+            },
+          ];
+      return {
+        description,
+        unit,
+        cost_price: cost,
+        selling_price: cost,
+        customizer_shared: shareAcrossBusinesses,
+        specs,
+        meta: {
+          calculator: "advanced-spreadsheet",
+          columns: columnMeta,
+          rateTable: calculated.map((row) => ({ ...row.cells })),
+          rows: rowList,
+          total: cost,
+          unlocked,
+          sku,
+          category: localCategory,
+          catalogueProductId: resolveCatalogueId(r),
           catalogueLinks: r.catalogueLinks,
-        })),
-        total,
-        unlocked,
-        sku: localSku,
-        category: localCategory,
-        // Primary row’s catalogue link → keep this product’s RATE in sync when that catalogue price changes
-        catalogueProductId: (() => {
-          if (primary.catalogueProductId) return primary.catalogueProductId;
-          // Fallback: catalogue column cell may hold a product_id
-          for (const col of columns) {
-            if (col.type !== "catalogue") continue;
-            const v = String(primary.cells[col.key] || "");
-            if (v && catalogueProducts.some((p) => p.product_id === v)) return v;
-          }
-          return undefined;
-        })(),
-        catalogueLinks: primary.catalogueLinks,
-        catalogueRateKey:
-          columns.find((c) => c.key === "RATE")?.key ||
-          columns.find((c) => c.type === "number" && c.key !== "QTY")?.key ||
-          "RATE",
-      },
+          catalogueVariants: r.catalogueVariants,
+          catalogueRateKey,
+          batchIndex: index,
+          batchCount,
+        },
+      };
+    }
+
+    // Edit mode: update the single product (all rows kept as its rate table / grid)
+    if (isEditing) {
+      const primary = calculated[0];
+      const description =
+        localProductName.trim() ||
+        productName ||
+        String(primary.cells.DESCRIPTION ?? "").trim() ||
+        "Custom product";
+      if (!description.trim()) return toast.error("Enter a product name.");
+      onAddToProduct(payloadForRow(primary, 0, 1, true));
+      setAdded(true);
+      setSaved(true);
+      toast.success(`“${description}” updated.`);
+      return;
+    }
+
+    // Create mode: each grid row becomes its own final product in the catalogue
+    const valid = calculated.filter((r) => {
+      const rowName = String(r.cells[descKey || "DESCRIPTION"] ?? "").trim();
+      return Boolean(rowName || localProductName.trim() || productName);
+    });
+    if (!valid.length) {
+      return toast.error(
+        "Enter a product name above, or put a name in each row’s Description cell.",
+      );
+    }
+
+    valid.forEach((r, index) => {
+      onAddToProduct!(payloadForRow(r, index, valid.length, false));
     });
     setAdded(true);
     setSaved(true);
-    toast.success(isEditing ? `“${description}” updated.` : `“${description}” saved to product catalogue.`);
+    toast.success(
+      valid.length === 1
+        ? `“${payloadForRow(valid[0], 0, 1, false).description}” saved to product catalogue.`
+        : `${valid.length} products saved to catalogue (one final product per row).`,
+    );
   }
 
   /**
@@ -943,8 +1142,9 @@ export function AdvancedQuotationCalculator({
           <div>
             <p className="font-semibold">Spreadsheet product builder</p>
             <p className="text-xs text-ink-muted">
-              Excel-style grid to cost a product, lock dropdowns you do not want edited later, then save
-              the result into your product catalogue. Unlocked fields appear on a card for editing.
+              Excel-style grid: each row can be a final product. Add rows, cost them, then save — one
+              catalogue product is created per row. Lock dropdowns you do not want edited later.
+              Unlocked fields appear on a card for editing.
             </p>
           </div>
         </div>
@@ -1243,6 +1443,43 @@ export function AdvancedQuotationCalculator({
                           </Select>
                           {col.lookupProductId ? (
                             <>
+                              {(() => {
+                                const src = catalogueProducts.find(
+                                  (p) =>
+                                    ("product_id" in p && p.product_id === col.lookupProductId) ||
+                                    (p as { product_id?: string }).product_id === col.lookupProductId,
+                                ) as Product | undefined;
+                                const opts = listProductRateOptions(src);
+                                if (!opts.length) return null;
+                                return (
+                                  <div className="space-y-1">
+                                    <label className="text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                                      Specific dropdown / rate row (optional)
+                                    </label>
+                                    <Select
+                                      className="h-8 text-xs"
+                                      value={col.lookupOption || ""}
+                                      title="Sync this product and a specific option from its rate table"
+                                      onChange={(e) =>
+                                        updateColumnMeta(col.id, {
+                                          lookupOption: e.target.value || undefined,
+                                        })
+                                      }
+                                    >
+                                      <option value="">— Entire product (all rows) —</option>
+                                      {opts.map((o) => (
+                                        <option key={o.value} value={o.value}>
+                                          {o.label}
+                                          {o.rate !== undefined ? ` · ${o.rate}` : ""}
+                                        </option>
+                                      ))}
+                                    </Select>
+                                    <p className="text-[10px] text-ink-muted">
+                                      Choose a built product list option (e.g. MS) to sync that row’s rates, or leave as entire product.
+                                    </p>
+                                  </div>
+                                );
+                              })()}
                               <label className="text-[10px] font-medium uppercase tracking-wide text-ink-muted">
                                 Fields to copy (one at a time optional)
                               </label>
@@ -1408,15 +1645,21 @@ export function AdvancedQuotationCalculator({
 
       {/* Product identity — saved into catalogue */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Field label="Product name" className="mb-0 sm:col-span-2">
+        <Field
+          label={isEditing ? "Product name" : "Product name (or use Description per row)"}
+          className="mb-0 sm:col-span-2"
+        >
           <Input
             value={localProductName}
             onChange={(e) => {
               setLocalProductName(e.target.value);
               setSaved(false);
             }}
-            placeholder="e.g. Custom mild steel frame"
-            required
+            placeholder={
+              isEditing
+                ? "e.g. Custom mild steel frame"
+                : "Shared name, or leave blank and name each row in Description"
+            }
           />
         </Field>
         <Field label="Unit" className="mb-0">
@@ -1619,10 +1862,12 @@ export function AdvancedQuotationCalculator({
                     const linked = linkedId
                       ? catalogueProducts.find((p) => (p as Product).product_id === linkedId)
                       : undefined;
+                    const linkedVariant = row.catalogueVariants?.[col.key] || "";
+                    const rateOpts = listProductRateOptions(linked as Product | undefined);
                     return (
                       <td
                         key={col.id}
-                        className="border-b border-ink/10 p-1 relative min-w-[160px]"
+                        className="border-b border-ink/10 p-1 relative min-w-[180px]"
                       >
                         <Input
                           className="h-8"
@@ -1637,27 +1882,70 @@ export function AdvancedQuotationCalculator({
                         <p className="px-1 pt-0.5 text-right text-sm font-medium tabular-nums">
                           {linked ? money(Number(value ?? 0)) : "—"}
                           {linked ? (
-                            <span className="ml-1 text-xs font-normal text-ink-muted">synced</span>
+                            <span className="ml-1 text-xs font-normal text-ink-muted">
+                              synced
+                              {linkedVariant ? ` · ${linkedVariant}` : ""}
+                            </span>
                           ) : null}
                         </p>
-                        {editable && search.trim() && matches.length > 0 && (
-                          <ul className="absolute z-20 mt-0.5 max-h-40 w-64 overflow-auto rounded-md border border-ink/15 bg-white shadow-lg text-xs">
-                            {matches.map((p) => (
-                              <li key={"product_id" in p ? p.product_id : p.name}>
-                                <button
-                                  type="button"
-                                  className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-leaf/40"
-                                  onClick={() => {
-                                    pickCatalogue(row.id, col.key, p);
-                                  }}
-                                >
-                                  <span className="truncate">{p.name}</span>
-                                  <span className="shrink-0 tabular-nums text-ink-muted">
-                                    {money(p.selling_price)}
-                                  </span>
-                                </button>
-                              </li>
+                        {editable && linked && rateOpts.length > 0 ? (
+                          <Select
+                            className="mt-1 h-8 text-xs"
+                            value={linkedVariant}
+                            title="Sync product and a specific dropdown / rate-table row"
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              pickCatalogue(row.id, col.key, linked as Product, v || undefined);
+                            }}
+                          >
+                            <option value="">Entire product</option>
+                            {rateOpts.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                                {o.rate !== undefined ? ` · ${o.rate}` : ""}
+                              </option>
                             ))}
+                          </Select>
+                        ) : null}
+                        {editable && search.trim() && matches.length > 0 && (
+                          <ul className="absolute z-20 mt-0.5 max-h-48 w-72 overflow-auto rounded-md border border-ink/15 bg-white shadow-lg text-xs">
+                            {matches.map((p) => {
+                              const opts = listProductRateOptions(p as Product);
+                              const id = "product_id" in p ? p.product_id : p.name;
+                              return (
+                                <li key={id} className="border-b border-ink/5 last:border-0">
+                                  <button
+                                    type="button"
+                                    className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-leaf/40"
+                                    onClick={() => {
+                                      pickCatalogue(row.id, col.key, p);
+                                    }}
+                                  >
+                                    <span className="truncate font-medium">{p.name}</span>
+                                    <span className="shrink-0 tabular-nums text-ink-muted">
+                                      {money(p.selling_price)}
+                                    </span>
+                                  </button>
+                                  {opts.length ? (
+                                    <div className="flex flex-wrap gap-1 px-2 pb-1.5">
+                                      {opts.slice(0, 8).map((o) => (
+                                        <button
+                                          key={o.value}
+                                          type="button"
+                                          className="rounded-full bg-leaf/40 px-2 py-0.5 text-[10px] hover:bg-leaf"
+                                          title={`Link ${p.name} · ${o.label}`}
+                                          onClick={() => {
+                                            pickCatalogue(row.id, col.key, p, o.value);
+                                          }}
+                                        >
+                                          {o.label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </li>
+                              );
+                            })}
                           </ul>
                         )}
                       </td>
@@ -1754,7 +2042,13 @@ export function AdvancedQuotationCalculator({
           <Plus className="mr-1 size-4" /> Add row
         </Button>
         <div className="text-right">
-          <p className="text-xs text-ink-muted">Final product costing</p>
+          <p className="text-xs text-ink-muted">
+            {isEditing
+              ? "Combined costing"
+              : calculated.length > 1
+                ? `${calculated.length} final products (one per row)`
+                : "Final product costing"}
+          </p>
           <p className="text-lg font-semibold tabular-nums">{money(total)}</p>
         </div>
       </div>
@@ -1772,17 +2066,25 @@ export function AdvancedQuotationCalculator({
             disabled={
               !calculated.length ||
               calculated.some((r) => Object.keys(r.errors).length > 0) ||
-              !localProductName.trim()
+              (isEditing && !localProductName.trim())
             }
           >
             <Package className="mr-2 size-4" />
-            {saved ? "Save again" : isEditing ? "Save changes to product" : "Save product to catalogue"}
+            {saved
+              ? "Save again"
+              : isEditing
+                ? "Save changes to product"
+                : calculated.length > 1
+                  ? `Save ${calculated.length} products to catalogue`
+                  : "Save product to catalogue"}
           </Button>
         )}
       </div>
       {saved ? (
         <p className="text-xs text-forest">
-          Product saved to the catalogue. You can adjust unlocked fields and save again if needed.
+          {isEditing
+            ? "Product saved to the catalogue. You can adjust unlocked fields and save again if needed."
+            : "Saved to the catalogue (one product per row). You can adjust and save again if needed."}
         </p>
       ) : null}
 
@@ -1870,11 +2172,15 @@ export function AdvancedQuotationCalculator({
                   disabled={
                     !calculated.length ||
                     calculated.some((r) => Object.keys(r.errors).length > 0) ||
-                    !localProductName.trim()
+                    (isEditing && !localProductName.trim())
                   }
                 >
                   <Package className="mr-1 size-4" />
-                  Save to catalogue
+                  {isEditing
+                    ? "Save changes"
+                    : calculated.length > 1
+                      ? `Save ${calculated.length} products`
+                      : "Save to catalogue"}
                 </Button>
               )}
             </div>
