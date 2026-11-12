@@ -102,6 +102,14 @@ export type MediaItem = {
 /** @deprecated use MediaItem — kept for any lingering references. */
 export type BusinessImage = MediaItem & { image_id: string; business_id: string };
 
+export type MarketplaceReview = {
+  review_id: string;
+  author_name: string;
+  rating: number;
+  text: string;
+  created_at: string;
+};
+
 export type Business = {
   business_id: string;
   owner_user_id: string;
@@ -114,7 +122,9 @@ export type Business = {
   listed: boolean;
   tagline: string;
   views: number;
+  likes: number;
   whatsapp_clicks: number;
+  reviews?: MarketplaceReview[];
   image_url: string;
   gallery: MediaItem[];
 };
@@ -231,7 +241,9 @@ export type Asset = {
   location: string;
   phone: string;
   views: number;
+  likes: number;
   whatsapp_clicks: number;
+  reviews?: MarketplaceReview[];
   created_date: string;
   status: string;
   notes: string;
@@ -487,6 +499,9 @@ export type MarketplaceListing = {
   specs: Record<string, string | number>;
   image_url: string;
   gallery: Array<{ media_id: string; url: string; name?: string; media_type?: string }>;
+  views?: number;
+  likes?: number;
+  reviews?: MarketplaceReview[];
 };
 
 export type Job = {

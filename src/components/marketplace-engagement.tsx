@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Heart, MessageSquareStar, Star } from "lucide-react";
+import { Eye, Heart, MessageSquare, Star } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -412,7 +412,7 @@ export function MarketplaceEngagement({
             setReviewOpen(true);
           }}
         >
-          <MessageSquareStar className={compact ? "size-3.5" : "size-4"} />
+          <MessageSquare className={compact ? "size-3.5" : "size-4"} />
           <span className="tabular-nums">{reviewCount}</span>
           {avgRating > 0 ? (
             <span className="tabular-nums text-ink-faint">· {avgRating}★</span>

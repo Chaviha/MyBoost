@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { PagedGrid } from "@/components/paged-grid";
 import { money } from "@/lib/format";
 import { pickRandomShowcase } from "@/lib/marketplace-mix";
-import type { MarketplaceListing } from "@/lib/types";
+import { MarketplaceEngagement } from "@/components/marketplace-engagement";
+import type { Business, MarketplaceListing } from "@/lib/types";
 
 /** How many products to show in the top random showcase. */
 export const SHOWCASE_COUNT = 6;
@@ -117,6 +118,15 @@ export function MarketplaceListings({ items, resetKey = "" }: { items: Marketpla
                 <h3 className="font-display text-xl font-medium tracking-tight">{item.name}</h3>
                 <p className="text-sm text-ink-muted">{item.business_name}</p>
                 <p className="font-display text-xl font-medium tabular-nums">{priceLabel(item)}</p>
+                <MarketplaceEngagement
+                  kind="product"
+                  id={item.product_id}
+                  views={item.views}
+                  likes={item.likes}
+                  reviews={item.reviews}
+                  compact
+                  recordViewOnMount
+                />
                 <Button
                   variant="secondary"
                   className="mt-2 w-full"
@@ -298,6 +308,15 @@ export function ProductShowcase({
               <h3 className="font-display text-xl font-medium tracking-tight">{item.name}</h3>
               <p className="text-sm text-ink-muted">{item.business_name}</p>
               <p className="font-display text-xl font-medium tabular-nums">{priceLabel(item)}</p>
+              <MarketplaceEngagement
+                kind="product"
+                id={item.product_id}
+                views={item.views}
+                likes={item.likes}
+                reviews={item.reviews}
+                compact
+                recordViewOnMount
+              />
               <Button
                 variant="secondary"
                 className="mt-2 w-full"
@@ -412,6 +431,69 @@ export function ProductShowcase({
           ) : null}
         </DialogContent>
       </Dialog>
+    </section>
+  );
+}
+
+/**
+ * Top-of-page business showcase: randomly reshuffles listed businesses on each load/refresh.
+ */
+export function BusinessShowcase({
+  businesses,
+  title = "Featured businesses",
+  count = 6,
+  onOpen,
+}: {
+  businesses: Business[];
+  title?: string;
+  count?: number;
+  onOpen?: (businessId: string) => void;
+}) {
+  const [items, setItems] = useState<Business[]>([]);
+
+  useEffect(() => {
+    const listed = businesses.filter((b) => b && b.business_id);
+    setItems(pickRandomShowcase(listed, count));
+  }, [businesses, count]);
+
+  if (!items.length) return null;
+
+  return (
+    <section className="mb-10">
+      <div className="mb-4">
+        <p className="text-xs font-medium tracking-[0.14em] text-forest uppercase">Showcase</p>
+        <h2 className="mt-1 font-display text-xl font-medium tracking-tight sm:text-2xl">{title}</h2>
+        <p className="mt-1 text-sm text-ink-muted">
+          Businesses reshuffle on every refresh so more listings get top visibility.
+        </p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((b) => (
+          <div
+            key={b.business_id}
+            className="cursor-pointer overflow-hidden rounded-xl border border-ink/10 bg-paper transition hover:-translate-y-0.5"
+            onClick={() => onOpen?.(b.business_id)}
+          >
+            <div className="p-5 space-y-2">
+              <p className="text-xs font-medium tracking-[0.14em] text-forest uppercase">
+                {b.business_type || "Business"}
+              </p>
+              <h3 className="font-display text-xl font-medium tracking-tight">{b.business_name}</h3>
+              <p className="text-sm text-ink-muted">{b.tagline || "Listed on lifeBoostSME Marketplace."}</p>
+              {b.region ? <p className="text-xs text-ink-muted">{b.region}</p> : null}
+              <MarketplaceEngagement
+                kind="business"
+                id={b.business_id}
+                views={b.views}
+                likes={b.likes}
+                reviews={b.reviews}
+                compact
+                recordViewOnMount
+              />
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

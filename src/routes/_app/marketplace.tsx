@@ -20,12 +20,14 @@ import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { ListingCover } from "@/components/listing-cover";
 import {
+  BusinessShowcase,
   filterListings,
   MarketKindChips,
   MarketplaceListings,
   ProductShowcase,
   type MarketKind,
 } from "@/components/marketplace-listings";
+import { MarketplaceEngagement } from "@/components/marketplace-engagement";
 import { PageHeader } from "@/components/page-header";
 import { PagedGrid } from "@/components/paged-grid";
 import { Badge } from "@/components/ui/badge";
@@ -305,7 +307,13 @@ function MarketplacePage() {
         {/* MARKET: products, services, assets and professionals */}
         <TabsContent value="market">
           {!ql && kind === "all" ? (
-            <ProductShowcase listings={publicMarketplace.listings as MarketplaceListing[]} />
+            <>
+              <BusinessShowcase
+                businesses={publicMarketplace.businesses as Business[]}
+                onOpen={(id) => setBusinessDetailId(id)}
+              />
+              <ProductShowcase listings={publicMarketplace.listings as MarketplaceListing[]} />
+            </>
           ) : null}
 
           <MarketKindChips kind={kind} onChange={setKind} />
