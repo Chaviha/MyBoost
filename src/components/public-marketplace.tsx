@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ListingCover } from "@/components/listing-cover";
 import { PagedGrid } from "@/components/paged-grid";
 import { BusinessShowcase, filterListings, MarketKindChips, MarketplaceListings, ProductShowcase, type MarketKind } from "@/components/marketplace-listings";
+import { dedupeByNameOrImage } from "@/lib/marketplace-mix";
 import { MarketplaceEngagement } from "@/components/marketplace-engagement";
 import { useLife } from "@/lib/store";
 import { initials, money } from "@/lib/format";
@@ -70,12 +71,15 @@ export function PublicMarketplace() {
 
   const query = q.trim().toLowerCase();
   const professionals = useMemo(() => (publicMarketplace.professionals as Array<Employee & { business_name?: string }>).filter(p => `${p.name} ${p.role} ${p.location} ${p.business_name || ""}`.toLowerCase().includes(query)), [publicMarketplace.professionals, query]);
-  const businesses = useMemo(() => (publicMarketplace.businesses as Business[]).filter(b => `${b.business_name} ${b.business_type} ${b.region} ${b.tagline}`.toLowerCase().includes(query)), [publicMarketplace.businesses, query]);
+  const businesses = useMemo(() => {
+    const filtered = (publicMarketplace.businesses as Business[]).filter(b => `${b.business_name} ${b.business_type} ${b.region} ${b.tagline}`.toLowerCase().includes(query));
+    return dedupeByNameOrImage(filtered, (b) => b.business_name, (b) => b.image_url);
+  }, [publicMarketplace.businesses, query]);
   const assets = useMemo(() => (publicMarketplace.assets as Asset[]).filter(a => `${a.name} ${a.type} ${a.location} ${a.notes}`.toLowerCase().includes(query)), [publicMarketplace.assets, query]);
   const listings = useMemo(() => filterListings(publicMarketplace.listings, kind, query), [publicMarketplace.listings, kind, query]);
   const showAssets = kind === "all" || kind === "asset";
   const showPros = kind === "all" || kind === "professional";
-  const showBusinesses = kind === "all" || kind === "business";
+  const showBusinesses = kind === "business";
   const resetKey = `${kind}|${query}`;
   const nothingToShow = listings.length === 0 && !(showAssets && assets.length > 0) && !(showPros && professionals.length > 0) && !(showBusinesses && businesses.length > 0);
   const selected = selectedId ? businesses.find(b => b.business_id === selectedId) ?? null : null;
@@ -111,13 +115,13 @@ export function PublicMarketplace() {
 
             <TabsContent value="market">
               {!loading && !serverError && !query && kind === "all" ? (
-                <>
-                  <BusinessShowcase
-                    businesses={publicMarketplace.businesses as Business[]}
-                    onOpen={(id) => setSelectedId(id)}
-                  />
-                  <ProductShowcase listings={publicMarketplace.listings as MarketplaceListing[]} />
-                </>
+                <ProductShowcase listings={publicMarketplace.listings as MarketplaceListing[]} />
+              ) : null}
+              {!loading && !serverError && !query && kind === "business" ? (
+                <BusinessShowcase
+                  businesses={publicMarketplace.businesses as Business[]}
+                  onOpen={(id) => setSelectedId(id)}
+                />
               ) : null}
               <div className="mt-4"><MarketKindChips kind={kind} onChange={setKind} /></div>
               {nothingToShow ? <Card className="p-10 text-center"><Store className="mx-auto size-8 text-ink-faint" /><p className="mt-3 font-medium">{q || kind !== "all" ? "Nothing matches your search." : "Nothing is listed yet."}</p></Card> : null}

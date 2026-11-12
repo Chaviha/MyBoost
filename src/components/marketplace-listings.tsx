@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PagedGrid } from "@/components/paged-grid";
 import { money } from "@/lib/format";
-import { pickRandomShowcase } from "@/lib/marketplace-mix";
+import { dedupeByNameOrImage, pickRandomShowcase } from "@/lib/marketplace-mix";
 import { MarketplaceEngagement } from "@/components/marketplace-engagement";
 import type { Business, MarketplaceListing } from "@/lib/types";
 
@@ -75,6 +75,8 @@ export function MarketKindChips({
 
 /** Which listings the current chip + search show. Products/services only appear under All, Products or Services. */
 export function filterListings(items: MarketplaceListing[], kind: MarketKind, query: string) {
+  const unique = dedupeByNameOrImage(items, (i) => i.name, (i) => i.image_url);
+  items = unique;
   if (kind === "asset" || kind === "professional" || kind === "business") return [];
   const q = query.trim().toLowerCase();
   return items.filter(

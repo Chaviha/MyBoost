@@ -28,6 +28,7 @@ import {
   type MarketKind,
 } from "@/components/marketplace-listings";
 import { MarketplaceEngagement } from "@/components/marketplace-engagement";
+import { dedupeByNameOrImage } from "@/lib/marketplace-mix";
 import { PageHeader } from "@/components/page-header";
 import { PagedGrid } from "@/components/paged-grid";
 import { Badge } from "@/components/ui/badge";
@@ -151,10 +152,14 @@ function MarketplacePage() {
   const listings = filterListings(publicMarketplace.listings, kind, q);
   const showAssets = kind === "all" || kind === "asset";
   const showPros = kind === "all" || kind === "professional";
-  const showBusinesses = kind === "all" || kind === "business";
+  const showBusinesses = false; // businesses live on the Businesses tab
 
-  const firms = (publicMarketplace.businesses as Business[]).filter((b) =>
-    `${b.business_name} ${b.tagline} ${b.region}`.toLowerCase().includes(ql),
+  const firms = dedupeByNameOrImage(
+    (publicMarketplace.businesses as Business[]).filter((b) =>
+      `${b.business_name} ${b.tagline} ${b.region}`.toLowerCase().includes(ql),
+    ),
+    (b) => b.business_name,
+    (b) => b.image_url,
   );
 
   const nothingToShow =
@@ -307,13 +312,7 @@ function MarketplacePage() {
         {/* MARKET: products, services, assets and professionals */}
         <TabsContent value="market">
           {!ql && kind === "all" ? (
-            <>
-              <BusinessShowcase
-                businesses={publicMarketplace.businesses as Business[]}
-                onOpen={(id) => setBusinessDetailId(id)}
-              />
-              <ProductShowcase listings={publicMarketplace.listings as MarketplaceListing[]} />
-            </>
+            <ProductShowcase listings={publicMarketplace.listings as MarketplaceListing[]} />
           ) : null}
 
           <MarketKindChips kind={kind} onChange={setKind} />
@@ -595,6 +594,12 @@ function MarketplacePage() {
 
         {/* BUSINESSES */}
         <TabsContent value="businesses">
+          {!ql && firms.length > 0 ? (
+            <BusinessShowcase
+              businesses={firms}
+              onOpen={(id) => setBusinessDetailId(id)}
+            />
+          ) : null}
           {firms.length === 0 ? (
             <EmptyState
               icon={Building2}

@@ -669,6 +669,104 @@ app.delete("/api/products/:productId/media/:mediaId", auth, async (req, res, nex
 
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
+
+/** Normalize marketplace name for duplicate detection (strip noise). */
+function normalizeMarketplaceName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\b(ltd|limited|llc|inc|co|company|the|and)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Normalize image URL — ignore empty placeholders and trivial query noise. */
+function normalizeMarketplaceImage(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const u = new URL(raw, "https://example.local");
+    return `${u.origin}${u.pathname}`.toLowerCase();
+  } catch {
+    return raw.toLowerCase().split("?")[0].split("#")[0];
+  }
+}
+
+function levenshtein(a, b) {
+  const m = a.length;
+  const n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const row = new Array(n + 1);
+  for (let j = 0; j <= n; j++) row[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = i - 1;
+    row[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = row[j];
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + cost);
+      prev = tmp;
+    }
+  }
+  return row[n];
+}
+
+/** True when names are the same or close enough to treat as one listing. */
+function marketplaceNamesFuzzyMatch(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // Containment: "ABC Hardware" vs "ABC Hardware Nairobi"
+  if (a.length >= 4 && b.length >= 4) {
+    if (a.includes(b) || b.includes(a)) return true;
+  }
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen < 3) return false;
+  const dist = levenshtein(a, b);
+  const similarity = 1 - dist / maxLen;
+  // ~85% similar, or at most 2 edits for short names
+  if (similarity >= 0.85) return true;
+  if (maxLen <= 12 && dist <= 2) return true;
+  // Token overlap (order-independent): "steel plate ms" vs "ms steel plate"
+  const ta = new Set(a.split(" ").filter((t) => t.length > 1));
+  const tb = new Set(b.split(" ").filter((t) => t.length > 1));
+  if (ta.size && tb.size) {
+    let inter = 0;
+    for (const t of ta) if (tb.has(t)) inter++;
+    const union = ta.size + tb.size - inter;
+    if (union > 0 && inter / union >= 0.8 && inter >= 2) return true;
+  }
+  return false;
+}
+
+/**
+ * Keep one listing when name is fuzzy-equal OR cover image matches.
+ * Prefer higher engagement (views + likes) when choosing which to keep.
+ */
+function dedupeMarketplaceByNameOrImage(items, getName, getImage) {
+  const list = Array.isArray(items) ? [...items] : [];
+  list.sort((a, b) => {
+    const score = (x) => Number(x?.views || 0) + Number(x?.likes || 0);
+    return score(b) - score(a);
+  });
+  const keptNames = [];
+  const seenImages = new Set();
+  const out = [];
+  for (const item of list) {
+    const name = normalizeMarketplaceName(getName(item));
+    const image = normalizeMarketplaceImage(getImage(item));
+    if (image && seenImages.has(image)) continue;
+    if (name && keptNames.some((k) => marketplaceNamesFuzzyMatch(k, name))) continue;
+    if (name) keptNames.push(name);
+    if (image) seenImages.add(image);
+    out.push(item);
+  }
+  return out;
+}
+
 // Public marketplace: only records explicitly marked `listed: true` are exposed.
 // No login is required, and private accounting/customer data is never returned.
 app.get("/api/public/marketplace", async (_req, res, next) => {
@@ -798,7 +896,25 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
       }
     }
 
-    res.json({ businesses, professionals, assets, products, listings });
+    // One card per unique business/product name or cover image
+    const uniqueBusinesses = dedupeMarketplaceByNameOrImage(
+      businesses,
+      (b) => b.business_name,
+      (b) => b.image_url,
+    );
+    const uniqueListings = dedupeMarketplaceByNameOrImage(
+      listings,
+      (l) => l.name,
+      (l) => l.image_url,
+    );
+
+    res.json({
+      businesses: uniqueBusinesses,
+      professionals,
+      assets,
+      products,
+      listings: uniqueListings,
+    });
   } catch (error) {
     next(error);
   }
