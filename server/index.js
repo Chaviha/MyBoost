@@ -700,7 +700,9 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
           image_url: business.image_url || "",
           gallery: Array.isArray(business.gallery) ? business.gallery : [],
           views: Number(business.views || 0),
+          likes: Number(business.likes || 0),
           whatsapp_clicks: Number(business.whatsapp_clicks || 0),
+          reviews: Array.isArray(business.reviews) ? business.reviews.slice(-50) : [],
         });
       }
 
@@ -737,7 +739,9 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
             image_url: asset.image_url || "",
             gallery: Array.isArray(asset.gallery) ? asset.gallery : [],
             views: Number(asset.views || 0),
+            likes: Number(asset.likes || 0),
             whatsapp_clicks: Number(asset.whatsapp_clicks || 0),
+            reviews: Array.isArray(asset.reviews) ? asset.reviews.slice(-50) : [],
           });
         }
       }
@@ -764,6 +768,9 @@ app.get("/api/public/marketplace", async (_req, res, next) => {
           specs: product.specs && typeof product.specs === "object" ? product.specs : {},
           image_url: product.image_url || "",
           gallery: Array.isArray(product.gallery) ? product.gallery : [],
+          views: Number(product.views || 0),
+          likes: Number(product.likes || 0),
+          reviews: Array.isArray(product.reviews) ? product.reviews.slice(-50) : [],
         });
       }
 
@@ -874,29 +881,212 @@ app.get("/api/quotation/customizer-products", auth, async (_req, res, next) => {
 });
 
 async function updatePublicBusinessMetric(businessId, field) {
+  return updatePublicMarketplaceMetric("business", businessId, field);
+}
+
+/**
+ * kind: "business" | "asset" | "product"
+ * field: "views" | "likes" | "whatsapp_clicks"
+ * Or pass field "review" with review payload via extra.review
+ */
+async function updatePublicMarketplaceMetric(kind, id, field, extra) {
   const rows = await pool.query("SELECT user_id, state FROM user_state");
   for (const row of rows.rows) {
     const state = row.state || {};
-    const business = Array.isArray(state.businesses) ? state.businesses.find((b) => b.business_id === businessId && b.listed) : null;
-    if (!business) continue;
-    business[field] = Number(business[field] || 0) + 1;
-    await pool.query("UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2", [JSON.stringify(state), row.user_id]);
-    return true;
+    let target = null;
+    if (kind === "business") {
+      target = Array.isArray(state.businesses)
+        ? state.businesses.find((b) => b.business_id === id && b.listed)
+        : null;
+    } else if (kind === "asset") {
+      target = Array.isArray(state.assets)
+        ? state.assets.find((a) => a.asset_id === id && a.listed)
+        : null;
+    } else if (kind === "product") {
+      target = Array.isArray(state.products)
+        ? state.products.find((p) => p.product_id === id && p.status !== "inactive")
+        : null;
+    }
+    if (!target) continue;
+
+    if (field === "review" && extra && extra.review) {
+      if (!Array.isArray(target.reviews)) target.reviews = [];
+      target.reviews.push(extra.review);
+      // keep last 100
+      if (target.reviews.length > 100) target.reviews = target.reviews.slice(-100);
+    } else {
+      target[field] = Number(target[field] || 0) + 1;
+    }
+    await pool.query("UPDATE user_state SET state=$1, updated_at=NOW() WHERE user_id=$2", [
+      JSON.stringify(state),
+      row.user_id,
+    ]);
+    return {
+      ok: true,
+      views: Number(target.views || 0),
+      likes: Number(target.likes || 0),
+      reviews: Array.isArray(target.reviews) ? target.reviews : [],
+    };
   }
-  return false;
+  return { ok: false };
+}
+
+function publicReviewFromBody(body) {
+  const author_name = String(body?.author_name || body?.name || "Anonymous").trim().slice(0, 80) || "Anonymous";
+  const text = String(body?.text || body?.comment || "").trim().slice(0, 2000);
+  let rating = Number(body?.rating);
+  if (!Number.isFinite(rating) || rating < 1 || rating > 5) rating = 5;
+  if (!text) return null;
+  return {
+    review_id: `REV${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    author_name,
+    rating: Math.round(rating),
+    text,
+    created_at: new Date().toISOString(),
+  };
 }
 
 app.post("/api/public/marketplace/businesses/:businessId/view", async (req, res, next) => {
   try {
-    const ok = await updatePublicBusinessMetric(String(req.params.businessId || ""), "views");
-    res.status(ok ? 200 : 404).json({ ok });
+    const result = await updatePublicMarketplaceMetric("business", String(req.params.businessId || ""), "views");
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+app.post("/api/public/marketplace/businesses/:businessId/like", async (req, res, next) => {
+  try {
+    const result = await updatePublicMarketplaceMetric("business", String(req.params.businessId || ""), "likes");
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+app.post("/api/public/marketplace/businesses/:businessId/review", async (req, res, next) => {
+  try {
+    const review = publicReviewFromBody(req.body || {});
+    if (!review) return res.status(400).json({ ok: false, error: "Review text is required." });
+    const result = await updatePublicMarketplaceMetric("business", String(req.params.businessId || ""), "review", { review });
+    res.status(result.ok ? 200 : 404).json(result);
   } catch (error) { next(error); }
 });
 
 app.post("/api/public/marketplace/businesses/:businessId/contact", async (req, res, next) => {
   try {
-    const ok = await updatePublicBusinessMetric(String(req.params.businessId || ""), "whatsapp_clicks");
-    res.status(ok ? 200 : 404).json({ ok });
+    const result = await updatePublicMarketplaceMetric("business", String(req.params.businessId || ""), "whatsapp_clicks");
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+app.post("/api/public/marketplace/assets/:assetId/view", async (req, res, next) => {
+  try {
+    const result = await updatePublicMarketplaceMetric("asset", String(req.params.assetId || ""), "views");
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+app.post("/api/public/marketplace/assets/:assetId/like", async (req, res, next) => {
+  try {
+    const result = await updatePublicMarketplaceMetric("asset", String(req.params.assetId || ""), "likes");
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+app.post("/api/public/marketplace/assets/:assetId/review", async (req, res, next) => {
+  try {
+    const review = publicReviewFromBody(req.body || {});
+    if (!review) return res.status(400).json({ ok: false, error: "Review text is required." });
+    const result = await updatePublicMarketplaceMetric("asset", String(req.params.assetId || ""), "review", { review });
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+app.post("/api/public/marketplace/products/:productId/view", async (req, res, next) => {
+  try {
+    const result = await updatePublicMarketplaceMetric("product", String(req.params.productId || ""), "views");
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+app.post("/api/public/marketplace/products/:productId/like", async (req, res, next) => {
+  try {
+    const result = await updatePublicMarketplaceMetric("product", String(req.params.productId || ""), "likes");
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+app.post("/api/public/marketplace/products/:productId/review", async (req, res, next) => {
+  try {
+    const review = publicReviewFromBody(req.body || {});
+    if (!review) return res.status(400).json({ ok: false, error: "Review text is required." });
+    const result = await updatePublicMarketplaceMetric("product", String(req.params.productId || ""), "review", { review });
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+/** Read-only engagement snapshot for real-time UI polling. */
+async function readPublicMarketplaceEngagement(kind, id) {
+  const rows = await pool.query("SELECT state FROM user_state");
+  for (const row of rows.rows) {
+    const state = row.state || {};
+    let target = null;
+    if (kind === "business") {
+      target = Array.isArray(state.businesses)
+        ? state.businesses.find((b) => b.business_id === id)
+        : null;
+    } else if (kind === "asset") {
+      target = Array.isArray(state.assets)
+        ? state.assets.find((a) => a.asset_id === id)
+        : null;
+    } else if (kind === "product") {
+      target = Array.isArray(state.products)
+        ? state.products.find((p) => p.product_id === id)
+        : null;
+    }
+    if (!target) continue;
+    return {
+      ok: true,
+      views: Number(target.views || 0),
+      likes: Number(target.likes || 0),
+      reviews: Array.isArray(target.reviews) ? target.reviews : [],
+    };
+  }
+  return { ok: false };
+}
+
+app.get("/api/public/marketplace/businesses/:businessId/engagement", async (req, res, next) => {
+  try {
+    const result = await readPublicMarketplaceEngagement("business", String(req.params.businessId || ""));
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+app.get("/api/public/marketplace/assets/:assetId/engagement", async (req, res, next) => {
+  try {
+    const result = await readPublicMarketplaceEngagement("asset", String(req.params.assetId || ""));
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+app.get("/api/public/marketplace/products/:productId/engagement", async (req, res, next) => {
+  try {
+    const result = await readPublicMarketplaceEngagement("product", String(req.params.productId || ""));
+    res.status(result.ok ? 200 : 404).json(result);
+  } catch (error) { next(error); }
+});
+
+/** Batch engagement for multiple cards — used by real-time polling on the marketplace grid. */
+app.post("/api/public/marketplace/engagement-batch", async (req, res, next) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    const out = [];
+    for (const item of items.slice(0, 60)) {
+      const kind = String(item?.kind || "");
+      const id = String(item?.id || "");
+      if (!kind || !id) continue;
+      if (kind !== "business" && kind !== "asset" && kind !== "product") continue;
+      const result = await readPublicMarketplaceEngagement(kind, id);
+      if (result.ok) out.push({ kind, id, views: result.views, likes: result.likes, review_count: (result.reviews || []).length });
+    }
+    res.json({ ok: true, items: out });
   } catch (error) { next(error); }
 });
 
