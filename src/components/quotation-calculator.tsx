@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Plus, Calculator, Trash2, ArrowDownToLine } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { CollapsibleCard } from "@/components/collapsible-card";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/field";
 import { money, uid } from "@/lib/format";
@@ -85,17 +85,11 @@ export function CustomQuotationCalculator({
   }
 
   return (
-    <Card className="mb-4 space-y-4 p-4">
-      <div className="flex items-start gap-3">
-        <div className="rounded-lg bg-leaf/50 p-2"><Calculator className="size-5" /></div>
-        <div>
-          <p className="font-semibold">Excel-style quotation calculator</p>
-          <p className="text-xs text-ink-muted">
-            Enter quantities and rates, then customise each amount formula. Use QTY and RATE in formulas.
-          </p>
-        </div>
-      </div>
-
+    <CollapsibleCard
+      title="Excel-style quotation calculator"
+      description="Enter quantities and rates, then customise each amount formula. Use QTY and RATE in formulas."
+      icon={<div className="rounded-lg bg-leaf/50 p-2"><Calculator className="size-5" /></div>}
+    >
       <div className="overflow-x-auto rounded-lg border border-ink/10">
         <table className="w-full min-w-[760px] border-collapse text-sm">
           <thead>
@@ -139,7 +133,7 @@ export function CustomQuotationCalculator({
       <p className="text-xs text-ink-muted">
         Formula examples: <code>=QTY*RATE</code>, <code>=IF(QTY&gt;10,RATE*0.9,RATE)</code>,{" "}
         <code>=SINDEG(30)*QTY</code>. Supports + − × ÷, parentheses, SIN/COS/TAN (degrees), SINRAD/COSRAD/TANRAD (radians),
-        ASIN/ACOS/ATAN/ATAN2 (inverse trig, degrees), IF, AND/OR/NOT, ABS/SQRT/MIN/MAX/ROUND, PI(). Each row calculates independently.
+        IF, AND/OR/NOT, ABS/SQRT/MIN/MAX/ROUND, PI(). Each row calculates independently.
       </p>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -156,6 +150,6 @@ export function CustomQuotationCalculator({
         <ArrowDownToLine className="mr-2 size-4" /> {added ? "Add updated calculations again" : "Transfer calculated items to quotation"}
       </Button>
       {added ? <p className="text-xs text-forest">Items have been added to the quotation below. Avoid transferring them twice unless you intend to duplicate them.</p> : null}
-    </Card>
+    </CollapsibleCard>
   );
 }

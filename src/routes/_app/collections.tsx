@@ -29,7 +29,7 @@ function toneFor(status: CustomerStatus) {
 function CollectionsPage() {
   const { allCustomers, visibleBusinesses, totalOutstanding, totalOverdue, can } = useLife();
   const [searchQuery, setSearchQuery] = useState("");
-  const [channel, setChannel] = useState("lifeboost");
+  const [channel, setChannel] = useState("myboost");
   const [reminderTiming, setReminderTiming] = useState("before");
   const [reminderDays, setReminderDays] = useState("3");
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -43,7 +43,7 @@ function CollectionsPage() {
         if (!response.ok) throw new Error(payload.error || "Could not load reminder preferences");
         if (!active) return;
         const settings = payload.settings || {};
-        setChannel(settings.channel || "lifeboost");
+        setChannel(settings.channel || "myboost");
         setReminderTiming(settings.timing || "before");
         setReminderDays(String(settings.days || 3));
       })
@@ -83,7 +83,7 @@ function CollectionsPage() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not send reminder");
-      if (payload.notificationCreated) toast.success(`LifeBoost notification sent to ${customer.name}.`);
+      if (payload.notificationCreated) toast.success(`MyBoost notification sent to ${customer.name}.`);
       if (payload.whatsapp?.url) {
         window.open(payload.whatsapp.url, "_blank", "noopener,noreferrer");
         toast.message("WhatsApp opened with the reminder prepared. Review and send it in WhatsApp.");
@@ -113,7 +113,7 @@ function CollectionsPage() {
     <>
       <PageHeader
         title="Smart collections"
-        subtitle="LifeBoost follows up with customers so you don't have to."
+        subtitle="MyBoost follows up with customers so you don't have to."
       />
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <MetricCard title="Total outstanding" value={money(totalOutstanding)} icon={Wallet} />
@@ -128,7 +128,7 @@ function CollectionsPage() {
           Collect while you run the business.
         </h2>
         <p className="mt-1 text-sm text-ink-muted">
-          Scheduled LifeBoost reminders reach linked customers. WhatsApp reminders open a prepared chat for you to review and send.
+          Scheduled MyBoost reminders reach linked customers. WhatsApp reminders open a prepared chat for you to review and send.
         </p>
         <div className="mt-4 grid gap-2 sm:grid-cols-5">
           {steps.map((step, i) => (
@@ -147,9 +147,9 @@ function CollectionsPage() {
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <label className="grid gap-1 text-sm">Notification channel
             <Select value={channel} onChange={(event) => setChannel(event.target.value)}>
-              <option value="lifeboost">LifeBoost notification</option>
+              <option value="myboost">MyBoost notification</option>
               <option value="whatsapp">WhatsApp</option>
-              <option value="both">WhatsApp + LifeBoost</option>
+              <option value="both">WhatsApp + MyBoost</option>
             </Select>
           </label>
           <label className="grid gap-1 text-sm">When to remind
@@ -166,7 +166,7 @@ function CollectionsPage() {
           </label>
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-ink-muted">The schedule sends in-app reminders to linked LifeBoost customers. WhatsApp opens a prepared chat when you click Send; fully automatic WhatsApp delivery requires WhatsApp Business API credentials.</p>
+          <p className="text-xs text-ink-muted">The schedule sends in-app reminders to linked MyBoost customers. WhatsApp opens a prepared chat when you click Send; fully automatic WhatsApp delivery requires WhatsApp Business API credentials.</p>
           <Button size="sm" onClick={() => void saveSettings()} disabled={savingSettings || !settingsLoaded}>
             <Save className="size-3.5" /> {savingSettings ? "Saving…" : "Save preferences"}
           </Button>

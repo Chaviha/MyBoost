@@ -1,7 +1,7 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "LifeBoost";
+const APP_NAME = "MyBoost";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -13,7 +13,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "LifeBoost — a financial life platform for Kenyan businesses. Net worth, sales, teams, and marketplace, with admin, owner, and employee roles.",
+          "MyBoost — a financial life platform for Kenyan businesses. Net worth, sales, teams, and marketplace, with admin, owner, and employee roles.",
       },
     ],
     links: [

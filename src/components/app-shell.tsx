@@ -301,7 +301,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <BoostMark />
           <div className="min-w-0 flex-1">
             <p className="font-display text-lg leading-none font-medium tracking-tight">
-              LifeBoostSME
+              MyBoost
             </p>
             <p className="mt-1.5 text-[11px] text-ink-muted">One app for work and money</p>
           </div>
@@ -672,7 +672,7 @@ function NotificationsMenu({
       const payload = await response.json();
       setServerItems((payload.notifications || []).map((item: { id: string; title: string; detail: string; href: string; created_at: string }) => ({
         id: `server-${item.id}`,
-        kind: "LifeBoostSME notification",
+        kind: "MyBoost notification",
         title: item.title || "Notification",
         detail: item.detail || "",
         href: item.href || "/",

@@ -429,7 +429,7 @@ function EmployeeForm({
           placeholder="Plumber / Welder / Engineer / Manager"
         />
       </Field>
-      <Field label="Email" hint="(creates their LifeBoost login)">
+      <Field label="Email" hint="(creates their MyBoost login)">
         <Input
           type="email"
           value={form.email}

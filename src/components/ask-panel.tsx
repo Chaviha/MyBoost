@@ -22,7 +22,7 @@ export function AskPanel() {
       <div className="mb-3 flex size-10 items-center justify-center rounded-md bg-leaf text-forest">
         <Bot className="size-5" />
       </div>
-      <p className="text-xs font-medium tracking-[0.14em] text-forest uppercase">Ask LifeBoost</p>
+      <p className="text-xs font-medium tracking-[0.14em] text-forest uppercase">Ask MyBoost</p>
       <h2 className="mt-1 font-display text-xl font-medium tracking-tight">Your financial assistant</h2>
       <p className="mt-1 text-sm text-ink-muted">
         Ask about money, businesses, assets, or what this role can do.
@@ -134,5 +134,5 @@ function answerFor(q: string, life: ReturnType<typeof useLife>) {
     return `${pending.length} pending request${pending.length === 1 ? "" : "s"} totalling ${money(total)}.`;
   }
 
-  return `You're viewing LifeBoost as ${currentUser.name} (${roleLabel(currentUser.account_level)}). Switch roles in the sidebar to see how the workspace changes.`;
+  return `You're viewing MyBoost as ${currentUser.name} (${roleLabel(currentUser.account_level)}). Switch roles in the sidebar to see how the workspace changes.`;
 }

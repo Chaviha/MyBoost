@@ -416,7 +416,7 @@ export function buildAssetsBrochureHtml(
     </header>
     ${body}
     <footer class="doc">
-      <span>Generated with LifeBoost · ${esc(when)}</span>
+      <span>Generated with MyBoost · ${esc(when)}</span>
       <span>Images · Description · Specs · Address &amp; contacts</span>
     </footer>
   </div>

@@ -63,7 +63,7 @@ function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Manage your LifeBoost account." />
+      <PageHeader title="Settings" subtitle="Manage your MyBoost account." />
       <Tabs defaultValue="profile">
         <TabsList className="mb-4 w-full max-w-full overflow-x-auto">
           <TabsTrigger value="profile">
@@ -179,7 +179,7 @@ function SettingsPage() {
             <h2 className="font-display text-xl font-medium">Security</h2>
             <p className="mt-2 text-sm text-ink-muted">
               You are on the {roleLabel(currentUser.account_level)} role. Your sign-in uses an
-              HttpOnly session cookie and your LifeBoost workspace is persisted in PostgreSQL.
+              HttpOnly session cookie and your MyBoost workspace is persisted in PostgreSQL.
               Password resets use short-lived, single-use tokens.
             </p>
           </Card>
@@ -460,7 +460,7 @@ function ProfileForm({
   return (
     <Card className="p-5">
       <h2 className="font-display text-xl font-medium">My profile</h2>
-      <p className="mt-1 mb-4 text-sm text-ink-muted">Your personal LifeBoost account details.</p>
+      <p className="mt-1 mb-4 text-sm text-ink-muted">Your personal MyBoost account details.</p>
 
       <div className="mb-5 flex items-center gap-4">
         <Avatar src={user.avatar_url} name={user.name} size="lg" />

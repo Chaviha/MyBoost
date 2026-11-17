@@ -1,26 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
-import { Calculator, Package, ArrowDownToLine, Search } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  Calculator,
+  Package,
+  ArrowDownToLine,
+  Search,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Field } from "@/components/field";
 import { money, uid } from "@/lib/format";
 import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
 import type { Product, ProductCustomizerConfig, QuoteLineItem } from "@/lib/types";
-import type { SubColumnDef, SubProduct } from "@/lib/sub-products";
-import { lookupRatesFromProductDetailed } from "@/components/advanced-quotation-calculator";
-import { applyCatalogueValues, resolveCatalogueLinks } from "@/lib/catalogue-sync";
-import { SubProductPicker } from "@/components/sub-product-editor";
-import { applySubProductRates, subProductSelectionCells } from "@/lib/sub-products";
-import {
-  applyRateTableRow,
-  listProductRateOptions,
-  rateTableSelectOptions,
-  resolveEffectiveRateConfig,
-  resolveRateTableSourceProduct,
-} from "@/lib/rate-table-select";
 
 /* evaluateArithmetic imported from @/lib/formula-eval */
 
@@ -69,52 +61,10 @@ type Props = {
  * Quote from a product-customizer catalogue item using different unlocked inputs.
  * Does not change the saved product — only builds a quotation line.
  */
-export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) {
-  // Customized products other businesses chose to share, plus the prices they depend on.
-  const [shared, setShared] = useState<{ products: Product[]; dependencies: Product[] }>({
-    products: [],
-    dependencies: [],
-  });
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/quotation/customizer-products", {
-          credentials: "include",
-          cache: "no-store",
-        });
-        if (!res.ok) return;
-        const data = (await res.json()) as { products?: unknown[]; dependencies?: unknown[] };
-        if (cancelled) return;
-        setShared({
-          products: (Array.isArray(data.products) ? data.products : []) as Product[],
-          dependencies: (Array.isArray(data.dependencies) ? data.dependencies : []) as Product[],
-        });
-      } catch {
-        /* offline / not signed in: own products only */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const ownIds = useMemo(() => new Set(ownProducts.map((p) => p.product_id)), [ownProducts]);
-  const foreign = useMemo(
-    () => shared.products.filter((p) => !ownIds.has(p.product_id)),
-    [shared.products, ownIds],
-  );
-  /** Own products plus shared ones' dependencies, for live price / rate-table lookups. */
-  const products = useMemo(
-    () => [...ownProducts, ...shared.dependencies.filter((d) => !ownIds.has(d.product_id))],
-    [ownProducts, shared.dependencies, ownIds],
-  );
-  const businessOf = useMemo(
-    () => new Map(foreign.map((p) => [p.product_id, (p as unknown as { business_name?: string }).business_name || ""])),
-    [foreign],
-  );
+export function CustomizerQuoteBuilder({ products, onAdd }: Props) {
   const customizerProducts = useMemo(
-    () => [...ownProducts, ...foreign].filter((p) => {
-      if (!ownIds.has(p.product_id)) return true; // shared products always carry a customizer
+    () =>
+      products.filter((p) => {
         if (p.customizer?.columns?.length) return true;
         if (p.customizer?.unlocked?.length) return true;
         if (p.customizer?.calculator === "advanced-spreadsheet") return true;
@@ -122,12 +72,13 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
         if ((p.description || "").toLowerCase().includes("spreadsheet product builder")) return true;
         if ((p.description || "").toLowerCase().includes("product customizer")) return true;
         return false;
-    }),
-    [ownProducts, foreign, ownIds],
+      }),
+    [products],
   );
 
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string>("");
+  const [showFieldsCard, setShowFieldsCard] = useState(false);
   const selected = customizerProducts.find((p) => p.product_id === selectedId) || null;
 
   const [cells, setCells] = useState<Record<string, string | number | null>>({});
@@ -158,110 +109,28 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
         p.unit,
         ...(p.customizer?.columns || []).map((c) => c.label),
         ...(p.customizer?.unlocked || []).map((u) => u.label),
-        businessOf.get(p.product_id),
       ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [customizerProducts, query, categoryFilter, businessOf]);
+  }, [customizerProducts, query, categoryFilter]);
 
   function pickProduct(p: Product) {
     setSelectedId(p.product_id);
-    const nextCells = { ...(p.customizer?.cells || {}) };
-    // Live sync: if linked to a catalogue product, use its current selling_price as RATE
-    const catId = p.customizer?.catalogueProductId || p.reference_product_id;
-    if (catId) {
-      const src = products.find((x) => x.product_id === catId);
-      if (src && typeof src.selling_price === "number") {
-        const rateKey = p.customizer?.catalogueRateKey || "RATE";
-        nextCells[rateKey] = src.selling_price;
-      }
-    }
-    // Catalogue columns carry the linked product's synced price, not its id
-    setCells(
-      applySubProductRates(
-        applyCatalogueValues(nextCells, resolveCatalogueLinks(p.customizer, products), products, p.customizer?.catalogueVariants),
-        p.customizer?.columns,
-        products,
-        p.customizer?.catalogueRateKey || "RATE",
-      ),
-    );
+    setCells({ ...(p.customizer?.cells || {}) });
     setQty("1");
   }
 
   const config = selected?.customizer;
-  const effectiveConfig = useMemo(
-    () => resolveEffectiveRateConfig(config, products, { preferSource: true }),
-    [config, products],
-  );
-  const rateSourceProduct = useMemo(
-    () => resolveRateTableSourceProduct(config, products),
-    [config, products],
-  );
-  const rateSelect = useMemo(
-    () => rateTableSelectOptions(effectiveConfig),
-    [effectiveConfig],
-  );
-
   // Quoters only: never include sizeLocked columns even if mis-listed in unlocked
-  const unlocked = useMemo(() => {
-    const base = (config?.unlocked || [])
-      .filter((u) => {
-        const col = config?.columns?.find((c) => c.key === u.key);
-        const colType = col?.type === "size" ? "dropdown" : col?.type;
-        if (colType === "dropdown" && col?.sizeLocked) return false;
-        if (col && col.editableByQuoter === false) return false;
-        return true;
-      })
-      .map((u) => {
-        const col = config?.columns?.find((c) => c.key === u.key);
-        const type = u.type === "size" ? "dropdown" : u.type;
-        return {
-          ...u,
-          type,
-          options: (u.options ?? col?.options)?.map(String) || [],
-          lookupProductId: (u as { lookupProductId?: string }).lookupProductId ?? col?.lookupProductId,
-          lookupMatchKey: (u as { lookupMatchKey?: string }).lookupMatchKey ?? col?.lookupMatchKey,
-          lookupFillKeys: (u as { lookupFillKeys?: string[] }).lookupFillKeys ?? col?.lookupFillKeys,
-          subProducts: (u as { subProducts?: SubProduct[] }).subProducts ?? col?.subProducts,
-          subColumns: (u as { subColumns?: SubColumnDef[] }).subColumns ?? col?.subColumns,
-          rateTableDriven: false as boolean,
-        };
-      });
-
-    // Auto first-column dropdown from spreadsheet builder rate-table rows
-    if (rateSelect.key && rateSelect.options.length) {
-      const optValues = rateSelect.options.map((o) => o.value);
-      const idx = base.findIndex((f) => f.key === rateSelect.key);
-      if (idx >= 0) {
-        const existing = base[idx];
-        base[idx] = {
-          ...existing,
-          type: "dropdown",
-          options: optValues,
-          rateTableDriven: true,
-          label: existing.label || rateSelect.key,
-        };
-        if (idx > 0) {
-          const [item] = base.splice(idx, 1);
-          base.unshift(item);
-        }
-      } else {
-        const col = config?.columns?.find((c) => c.key === rateSelect.key);
-        base.unshift({
-          key: rateSelect.key,
-          label: col?.label || rateSelect.key,
-          type: "dropdown",
-          unit: col?.unit,
-          options: optValues,
-          rateTableDriven: true,
-        } as (typeof base)[number]);
-      }
-    }
-    return base;
-  }, [config, rateSelect]);
+  const unlocked = (config?.unlocked || []).filter((u) => {
+    const col = config?.columns?.find((c) => c.key === u.key);
+    if (col?.type === "size" && col.sizeLocked) return false;
+    if (col && col.editableByQuoter === false) return false;
+    return true;
+  });
 
   const computed = useMemo(() => {
     if (!config) return { cells, total: 0, error: undefined as string | undefined };
@@ -269,86 +138,7 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
   }, [cells, config]);
 
   function updateField(key: string, value: string | number | null) {
-    setCells((c) => {
-      let next: Record<string, string | number | null> = { ...c, [key]: value };
-      const field = unlocked.find((u) => u.key === key);
-      const col = config?.columns?.find((x) => x.key === key);
-
-      // Spreadsheet builder row selected → fill associated cells from that rate-table row
-      if (field?.rateTableDriven && value) {
-        if (rateSelect.missingRateTable || !rateSelect.options.length) {
-          toast.error(
-            "No rate table on this product. Open Spreadsheet product builder, add at least one row, and save.",
-          );
-        } else {
-          const raw = String(value);
-          const match =
-            rateSelect.options.find((o) => o.value === raw) ||
-            rateSelect.options.find((o) => String(o.row[key] ?? "").trim() === raw) ||
-            rateSelect.options.find((o) => o.label === raw);
-          if (match) {
-            next = applyRateTableRow(next, match.row, config);
-            if (rateSelect.key) {
-              const identity = match.row[rateSelect.key];
-              next[rateSelect.key] =
-                identity !== undefined && identity !== null && String(identity).trim() !== ""
-                  ? identity
-                  : match.label;
-            }
-          } else {
-            toast.error(
-              `No rate-table row matches “${raw}”. Add that row in the Spreadsheet product builder and save.`,
-            );
-          }
-        }
-      }
-
-      if (field?.type === "subproduct" || col?.type === "subproduct") {
-        const unitKey = config?.columns?.find((x) => x.key.toUpperCase() === "UNIT")?.key;
-        Object.assign(
-          next,
-          subProductSelectionCells(
-            {
-              key,
-              type: "subproduct",
-              subProducts: field?.subProducts ?? col?.subProducts,
-              subColumns: field?.subColumns ?? col?.subColumns,
-            },
-            String(value ?? ""),
-            products,
-            config?.catalogueRateKey || "RATE",
-            unitKey,
-            config?.columns?.map((x) => x.key),
-          ),
-        );
-      }
-      const lookupProductId = field?.lookupProductId ?? col?.lookupProductId;
-      if ((field?.type === "dropdown" || col?.type === "dropdown") && lookupProductId && value && !field?.rateTableDriven) {
-        const source = products.find((p) => p.product_id === lookupProductId);
-        const fillKeys =
-          field?.lookupFillKeys?.length || col?.lookupFillKeys?.length
-            ? field?.lookupFillKeys || col?.lookupFillKeys || []
-            : ["RATE", "DENSITY"];
-        const matchKey = field?.lookupMatchKey || col?.lookupMatchKey || key;
-        const lookup = lookupRatesFromProductDetailed(
-          source,
-          String(value),
-          matchKey,
-          fillKeys,
-        );
-        if (lookup.error) {
-          toast.error(lookup.error);
-        }
-        for (const [srcKey, srcVal] of Object.entries(lookup.values)) {
-          const target =
-            config?.columns?.find((x) => x.key.toUpperCase() === srcKey.toUpperCase())?.key ||
-            unlocked.find((x) => x.key.toUpperCase() === srcKey.toUpperCase())?.key ||
-            srcKey;
-          next[target] = srcVal;
-        }
-      }
-      return next;
-    });
+    setCells((c) => ({ ...c, [key]: value }));
   }
 
   function addToQuote() {
@@ -482,7 +272,6 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
                 {p.sku ? ` · ${p.sku}` : ""}
                 {" · "}
                 <span className="text-forest">Customizer</span>
-                {businessOf.get(p.product_id) ? ` · from ${businessOf.get(p.product_id)}` : ""}
               </span>
             </span>
             <span className="shrink-0 tabular-nums text-ink-muted">{money(p.selling_price)}</span>
@@ -495,131 +284,60 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
 
       {selected && config ? (
         <>
-          <Card className="space-y-3 border-forest/20 bg-leaf/20 p-4 shadow-none">
-            <div className="flex items-start gap-2">
-              <Package className="mt-0.5 size-4 shrink-0 text-forest" />
-              <div>
-                <p className="text-sm font-semibold">{selected.name}</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium text-ink-muted">
+              Inputs for <span className="text-ink">{selected.name}</span>
+            </p>
+            <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-ink/15 bg-paper px-2.5 py-1.5 text-xs">
+              <input
+                type="checkbox"
+                className="size-3.5 accent-forest"
+                checked={showFieldsCard}
+                onChange={(e) => setShowFieldsCard(e.target.checked)}
+              />
+              <Package className="size-3.5" />
+              Fields
+            </label>
+          </div>
+
+          {showFieldsCard && (
+            <Card className="space-y-3 border-forest/20 bg-leaf/20 p-4 shadow-none">
+              <div className="flex items-start gap-2">
+                <Package className="mt-0.5 size-4 shrink-0 text-forest" />
+                <div>
+                  <p className="text-sm font-semibold">{selected.name}</p>
+                  <p className="text-xs text-ink-muted">
+                    Edit unlocked fields for this quote only. Locked sizes stay fixed.
+                  </p>
+                </div>
+              </div>
+
+              {unlocked.length === 0 ? (
                 <p className="text-xs text-ink-muted">
-                  Edit unlocked fields for this quote only. Locked sizes stay fixed. Choose a
-                  spreadsheet row from the first dropdown to load its rates and sizes.
+                  This product has no unlocked fields — using saved costing.
                 </p>
-              </div>
-            </div>
-
-            {rateSelect.missingRateTable ? (
-              <div
-                role="alert"
-                className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-              >
-                <p className="font-medium">Rate table missing</p>
-                <p className="mt-0.5 text-xs text-amber-800">
-                  This product has no spreadsheet rate-table rows. Open Spreadsheet product builder,
-                  add at least one row, and save — then the variant dropdown will appear here.
-                </p>
-              </div>
-            ) : null}
-
-            {unlocked.length === 0 ? (
-              <p className="text-xs text-ink-muted">
-                This product has no unlocked fields — using saved costing.
-              </p>
-            ) : (
-              <div className="grid gap-2 sm:grid-cols-2">
-                {unlocked.map((u) => {
-                  const isDropdown = u.type === "dropdown" || u.type === "size";
-                  const dropdownOptions = (u.options || []).map(String);
-                  const isNumeric = u.type === "number";
-                  const value = cells[u.key];
-                  return (
-                    <div key={u.key} className="rounded-md border border-ink/10 bg-paper px-3 py-2">
-                      <label className="mb-1 block text-xs text-ink-muted">
-                        {u.label}
-                        {u.unit ? ` (${u.unit})` : ""}
-                        {u.rateTableDriven ? (
-                          <span className="ml-1 text-[10px] text-forest">
-                            {rateSourceProduct
-                              ? ` · same table as ${rateSourceProduct.name}`
-                              : " · rows from spreadsheet builder"}
-                          </span>
-                        ) : null}
-                      </label>
-                      {u.type === "subproduct" ? (
-                        <SubProductPicker
-                          tree={u.subProducts}
-                          value={String(value ?? "")}
-                          onChange={(label) => updateField(u.key, label)}
-                        />
-                      ) : u.type === "catalogue" ? (
-                        <div className="flex h-9 items-center justify-between rounded-md border border-ink/10 bg-leaf/30 px-3 text-sm">
-                          <span className="truncate text-ink-muted">
-                            {products.find(
-                              (x) =>
-                                x.product_id ===
-                                resolveCatalogueLinks(config, products)[u.key],
-                            )?.name || "Catalogue item"}
-                          </span>
-                          <span className="font-medium tabular-nums">{money(Number(value ?? 0))}</span>
-                        </div>
-                      ) : isDropdown ? (
-                        <Select
-                          className="h-9"
-                          value={
-                            (() => {
-                              if (value === null || value === undefined || value === "") return "";
-                              const raw = String(value);
-                              if (!u.rateTableDriven) return raw;
-                              const byValue = rateSelect.options.find((o) => o.value === raw);
-                              if (byValue) return byValue.value;
-                              const byCell = rateSelect.options.find(
-                                (o) => String(o.row[u.key] ?? "").trim() === raw,
-                              );
-                              if (byCell) return byCell.value;
-                              return raw;
-                            })()
-                          }
-                          onChange={(e) => updateField(u.key, e.target.value)}
-                        >
-                          <option value="">Select…</option>
-                          {u.rateTableDriven
-                            ? rateSelect.options.length
-                              ? rateSelect.options.map((opt) => (
-                                  <option key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                  </option>
-                                ))
-                              : (
-                                  <option value="" disabled>
-                                    No rate-table rows — add rows in Spreadsheet product builder
-                                  </option>
-                                )
-                            : (() => {
-                                const src = u.lookupProductId
-                                  ? products.find((p) => p.product_id === u.lookupProductId)
-                                  : undefined;
-                                const linkedOpts = listProductRateOptions(src);
-                                if (linkedOpts.length) {
-                                  return linkedOpts.map((opt) => (
-                                    <option key={opt.value} value={opt.value}>
-                                      {opt.label}
-                                      {opt.rate !== undefined ? ` · ${opt.rate}` : ""}
-                                    </option>
-                                  ));
-                                }
-                                return dropdownOptions.map((opt) => (
-                                  <option key={opt} value={opt}>
-                                    {opt}
-                                    {u.unit ? ` ${u.unit}` : ""}
-                                  </option>
-                                ));
-                              })()}
-                        </Select>
-                      ) : (
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {unlocked.map((u) => {
+                    const isNumeric = u.type === "number" || u.type === "size";
+                    const value = cells[u.key];
+                    return (
+                      <div
+                        key={u.key}
+                        className="rounded-md border border-ink/10 bg-paper px-3 py-2"
+                      >
+                        <label className="mb-1 block text-xs text-ink-muted">
+                          {u.label}
+                          {u.unit ? ` (${u.unit})` : ""}
+                        </label>
                         <Input
                           className="h-9"
                           type={isNumeric ? "number" : "text"}
                           min={isNumeric ? 0 : undefined}
-                          value={value === null || value === undefined ? "" : String(value)}
+                          step={u.type === "size" ? "any" : undefined}
+                          value={
+                            value === null || value === undefined ? "" : String(value)
+                          }
                           onChange={(e) => {
                             const raw = e.target.value;
                             if (isNumeric) {
@@ -629,35 +347,39 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
                             }
                           }}
                         />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Field label="Quote quantity" className="mb-0">
-                <Input
-                  type="number"
-                  min={0}
-                  value={qty}
-                  onChange={(e) => setQty(e.target.value)}
-                />
-              </Field>
-              <div className="flex flex-col justify-end">
-                <p className="text-xs text-ink-muted">Unit cost (from formulas)</p>
-                <p className="text-lg font-semibold tabular-nums">{money(computed.total)}</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Field label="Quote quantity" className="mb-0">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={qty}
+                    onChange={(e) => setQty(e.target.value)}
+                  />
+                </Field>
+                <div className="flex flex-col justify-end">
+                  <p className="text-xs text-ink-muted">Unit cost (from formulas)</p>
+                  <p className="text-lg font-semibold tabular-nums">
+                    {money(computed.total)}
+                  </p>
+                </div>
               </div>
-            </div>
-            {computed.error ? <p className="text-xs text-red-600">{computed.error}</p> : null}
-            <div className="flex items-center justify-between border-t border-ink/10 pt-2 text-sm">
-              <span className="text-ink-muted">Line total</span>
-              <span className="font-semibold tabular-nums">
-                {money(computed.total * (Number(qty) || 0))}
-              </span>
-            </div>
-          </Card>
+              {computed.error ? (
+                <p className="text-xs text-red-600">{computed.error}</p>
+              ) : null}
+              <div className="flex items-center justify-between border-t border-ink/10 pt-2 text-sm">
+                <span className="text-ink-muted">Line total</span>
+                <span className="font-semibold tabular-nums">
+                  {money(computed.total * (Number(qty) || 0))}
+                </span>
+              </div>
+            </Card>
+          )}
 
           <div className="flex flex-wrap gap-2">
             <Button

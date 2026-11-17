@@ -10,7 +10,7 @@ export function getRouter() {
       <div className="min-h-dvh bg-canvas flex items-center justify-center p-6">
         <div className="text-center">
           <h1 className="font-display text-3xl font-medium">Page not found</h1>
-          <p className="mt-2 text-sm text-ink-muted">The LifeBoost page you requested does not exist.</p>
+          <p className="mt-2 text-sm text-ink-muted">The MyBoost page you requested does not exist.</p>
         </div>
       </div>
     ),

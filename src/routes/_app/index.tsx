@@ -21,14 +21,14 @@ function OverviewPage() {
   const life = useLife();
   const { currentUser, workspace } = life;
 
-  // Owner workspace: only Growth rate, B/S assets owned by owner, and Ask LifeBoost
+  // Owner workspace: only Growth rate, B/S assets owned by owner, and Ask MyBoost
   if (workspace === "owner") {
     return (
       <>
         <PageHeader
           eyebrow={`Good to see you, ${firstName(currentUser.name)}`}
           title="Owner workspace"
-          subtitle="Growth rate, businesses & assets you own, and Ask LifeBoost."
+          subtitle="Growth rate, businesses & assets you own, and Ask MyBoost."
         />
         <div className="grid gap-4 lg:grid-cols-5">
           <GrowthCard />
@@ -45,7 +45,7 @@ function OverviewPage() {
     <>
       <PageHeader
         eyebrow={`Good to see you, ${firstName(currentUser.name)}`}
-        title="LifeBoostSME"
+        title="MyBoost"
         subtitle="Your real financial growth, opportunities, assistant, and marketplace — without demo data."
       />
       <div className="grid gap-4 lg:grid-cols-5">
@@ -140,7 +140,7 @@ function GrowthCard() {
           </ResponsiveContainer>
         ) : (
           <div className="flex h-full items-center justify-center rounded-lg bg-canvas px-6 text-center text-sm text-ink-muted">
-            Record at least two months of sales to see a real growth-rate trend. LifeBoost will not
+            Record at least two months of sales to see a real growth-rate trend. MyBoost will not
             invent a growth percentage.
           </div>
         )}
@@ -328,7 +328,7 @@ function OffersCard() {
       </div>
       {myOffers.length === 0 ? (
         <div className="mt-5 rounded-lg bg-canvas p-5 text-sm text-ink-muted">
-          No offers yet. Offers will appear here when another LifeBoost user sends one to this
+          No offers yet. Offers will appear here when another MyBoost user sends one to this
           account.
         </div>
       ) : (
@@ -394,7 +394,7 @@ function MarketplaceCard() {
                 <p className="text-xs text-forest">{business.business_type}</p>
                 <p className="mt-1 font-display text-lg font-medium">{business.business_name}</p>
                 <p className="mt-1 truncate text-xs text-ink-muted">
-                  {business.tagline || business.region || "Listed on LifeBoost"}
+                  {business.tagline || business.region || "Listed on MyBoost"}
                 </p>
               </div>
             </Link>

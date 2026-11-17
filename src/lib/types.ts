@@ -1,4 +1,3 @@
-import type { SubColumnDef, SubProduct } from "@/lib/sub-products";
 export type AccountLevel = "admin" | "owner" | "user";
 
 export type RelationshipType = "owner" | "employee" | "customer" | "supplier";
@@ -102,14 +101,6 @@ export type MediaItem = {
 /** @deprecated use MediaItem — kept for any lingering references. */
 export type BusinessImage = MediaItem & { image_id: string; business_id: string };
 
-export type MarketplaceReview = {
-  review_id: string;
-  author_name: string;
-  rating: number;
-  text: string;
-  created_at: string;
-};
-
 export type Business = {
   business_id: string;
   owner_user_id: string;
@@ -122,9 +113,7 @@ export type Business = {
   listed: boolean;
   tagline: string;
   views: number;
-  likes: number;
   whatsapp_clicks: number;
-  reviews?: MarketplaceReview[];
   image_url: string;
   gallery: MediaItem[];
 };
@@ -241,9 +230,7 @@ export type Asset = {
   location: string;
   phone: string;
   views: number;
-  likes: number;
   whatsapp_clicks: number;
-  reviews?: MarketplaceReview[];
   created_date: string;
   status: string;
   notes: string;
@@ -358,7 +345,7 @@ export type Product = {
   price_override?: number;
   pricing_unit?: string;
   last_price_changed_at?: string;
-  /** when true, this product is offered up across LifeBoost for anyone building a
+  /** when true, this product is offered up across MyBoost for anyone building a
    * quotation — any sector, not just this product's own business — via the public
    * marketplace endpoint. */
   listed?: boolean;
@@ -367,44 +354,23 @@ export type Product = {
    * a card and edit unlocked fields (sizes, qty, rates, etc.) and refresh costing.
    */
   customizer?: ProductCustomizerConfig;
-  /**
-   * Customized products only. When true, other businesses can find this product and use it in
-   * their own quotations (they get its columns, formulas and unlocked inputs, never your cost
-   * price). Off by default; the creator turns it on in the product builder.
-   */
-  customizer_shared?: boolean;
 };
 
 /** Column / unlock config saved with a product built via the spreadsheet customizer. */
 export type ProductCustomizerColumn = {
   key: string;
   label: string;
-  type: "text" | "number" | "catalogue" | "formula" | "dropdown" | "subproduct";
+  type: "text" | "number" | "catalogue" | "formula" | "size" | "checkbox";
   formula?: string;
   editableByQuoter: boolean;
   unit?: string;
-  /** @deprecated was used for size columns; kept for older saved products */
   sizeLocked?: boolean;
-  /** Choices for dropdown columns (text values set by the product creator). */
-  options?: string[];
   /**
-   * For dropdown columns: pull RATE / DENSITY (or other fields) from another product’s rate table
-   * when the user picks a value (e.g. MS, GI, Bronze, AL).
+   * For checkbox columns: key of a number/formula/catalogue cell whose value is
+   * included in the final cost when the checkbox is checked.
+   * Empty = legacy mode (checkbox includes/excludes the whole row amount).
    */
-  lookupProductId?: string;
-  /** Column key on the source product used to match the selected dropdown value (e.g. MATERIAL). */
-  lookupMatchKey?: string;
-  /** Column keys to copy from the matched source row into this product’s cells (e.g. RATE, DENSITY). */
-  lookupFillKeys?: string[];
-  /**
-   * Optional fixed rate-table option on the linked lookup product (e.g. "MS").
-   * When set, catalogue/rate sync uses that specific dropdown row, not only the product.
-   */
-  lookupOption?: string;
-  /** Sub-products column: products nested inside this product (tree → one dropdown per layer). */
-  subProducts?: SubProduct[];
-  /** The sub-product grid's own columns (text / number / formula / catalogue). */
-  subColumns?: SubColumnDef[];
+  costingSourceKey?: string;
 };
 
 export type ProductCustomizerConfig = {
@@ -415,41 +381,8 @@ export type ProductCustomizerConfig = {
   /** Per-column formulas (may override column defaults). */
   formulas?: Record<string, string>;
   /** Fields the creator left unlocked for later editing. */
-  unlocked: Array<{
-    key: string;
-    label: string;
-    type: string;
-    unit?: string;
-    options?: string[];
-    lookupProductId?: string;
-    lookupMatchKey?: string;
-    lookupFillKeys?: string[];
-    subProducts?: SubProduct[];
-    subColumns?: SubColumnDef[];
-  }>;
+  unlocked: Array<{ key: string; label: string; type: string; unit?: string }>;
   total?: number;
-  /**
-   * All material / option rows from the spreadsheet builder.
-   * Used by other products’ dropdowns to look up RATE, DENSITY, etc. by option value.
-   */
-  rateTable?: Array<Record<string, string | number | null>>;
-  /**
-   * Catalogue product linked as the rate/price source.
-   * When that product’s selling_price changes, this product’s RATE (and price) sync.
-   */
-  catalogueProductId?: string;
-  /** Cell key that receives the catalogue selling price (default RATE). */
-  catalogueRateKey?: string;
-  /**
-   * Catalogue columns: columnKey → linked product_id. The column's cell holds the product's
-   * synced selling price (a number); the id is kept here so the value can stay in sync.
-   */
-  catalogueLinks?: Record<string, string>;
-  /**
-   * Catalogue columns: columnKey → specific rate-table / dropdown option on the linked product
-   * (e.g. "MS", "GI"). When set, sync uses that row’s RATE from the source product’s rate table.
-   */
-  catalogueVariants?: Record<string, string>;
 };
 
 /**
@@ -470,7 +403,7 @@ export type ProductVariant = {
 };
 
 /** A listed product as returned by the cross-account /api/public/marketplace feed.
- * This is the catalog quotations search against — spans every business on LifeBoost,
+ * This is the catalog quotations search against — spans every business on MyBoost,
  * regardless of sector (steel, agriculture, construction, etc). */
 export type MarketplaceProduct = {
   product_id: string;
@@ -499,9 +432,6 @@ export type MarketplaceListing = {
   specs: Record<string, string | number>;
   image_url: string;
   gallery: Array<{ media_id: string; url: string; name?: string; media_type?: string }>;
-  views?: number;
-  likes?: number;
-  reviews?: MarketplaceReview[];
 };
 
 export type Job = {

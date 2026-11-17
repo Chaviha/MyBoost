@@ -1,7 +1,7 @@
 import type { LifeState } from "./types";
 
 /**
- * A brand-new LifeBoost workspace starts empty.
+ * A brand-new MyBoost workspace starts empty.
  * There are deliberately no demo businesses, customers, products, sales,
  * employees, or financial figures in the application seed.
  */

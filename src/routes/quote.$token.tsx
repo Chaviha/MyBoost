@@ -200,7 +200,7 @@ function PublicQuoteReviewPage() {
           )}
         </Card>
 
-        <p className="text-center text-[11px] text-ink-faint">Powered by LifeBoost</p>
+        <p className="text-center text-[11px] text-ink-faint">Powered by MyBoost</p>
       </div>
     </div>
   );

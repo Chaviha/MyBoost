@@ -126,7 +126,7 @@ export function buildCatalogueHtml(
     <div class="meta">Product catalogue · ${products.length} item${products.length === 1 ? "" : "s"} · Generated ${esc(when)}</div>
   </header>
   ${sections || "<p>No products in this catalogue yet.</p>"}
-  <footer>Generated with LifeBoost · Prices subject to change</footer>
+  <footer>Generated with MyBoost · Prices subject to change</footer>
   <script>window.onload = function () { /* ready for print */ };</script>
 </body>
 </html>`;
@@ -187,7 +187,7 @@ export async function shareCatalogue(
   if (navigator.share) {
     await navigator.share({
       title: `${business.business_name} catalogue`,
-      text: `Product catalogue — ${products.length} items. Open LifeBoost to view full list.`,
+      text: `Product catalogue — ${products.length} items. Open MyBoost to view full list.`,
     });
     return "shared";
   }

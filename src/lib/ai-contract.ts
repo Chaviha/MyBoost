@@ -3,7 +3,7 @@ import type { JobResourceUsage, QuoteLineItem } from "./types";
 /**
  * Provider-neutral payload for AI quotation analysis.
  * AI providers may interpret drawings/photos/text, but they return this contract.
- * LifeBoost then resolves catalogue prices and performs the financial calculation.
+ * MyBoost then resolves catalogue prices and performs the financial calculation.
  */
 export type AIQuotationInput = {
   version: "1";

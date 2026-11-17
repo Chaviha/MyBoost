@@ -122,7 +122,7 @@ function CustomersPage() {
                     <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-xs text-ink-muted">
                         Due {formatDate(customer.due_date)}
-                        {customer.user_id ? " · linked LifeBoost account" : ""}
+                        {customer.user_id ? " · linked MyBoost account" : ""}
                         {customer.allow_customer_payments ? " · customer payments enabled" : " · customer payments disabled"}
                       </p>
                       <label className="flex items-center gap-2 text-sm">
@@ -410,7 +410,7 @@ function CustomerForm({
       <Field label="Phone">
         <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
       </Field>
-      <Field label="Email" hint="(links their LifeBoost login)">
+      <Field label="Email" hint="(links their MyBoost login)">
         <Input
           type="email"
           value={form.email}

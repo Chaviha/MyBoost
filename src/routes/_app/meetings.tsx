@@ -237,7 +237,7 @@ function MeetingsPage() {
       {loading ? (
         <Card className="p-6 text-sm text-ink-muted">Loading your meetings…</Card>
       ) : meetings.length === 0 ? (
-        <EmptyState icon={Video} text="No meetings yet. Create a meeting and invite another LifeBoost user." />
+        <EmptyState icon={Video} text="No meetings yet. Create a meeting and invite another MyBoost user." />
       ) : (
         <div className="grid gap-5 lg:grid-cols-[20rem_1fr]">
           <Card className="h-fit overflow-hidden p-2">
@@ -295,7 +295,7 @@ function MeetingsPage() {
       <Dialog open={openCreate} onOpenChange={setOpenCreate}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create a LifeBoost meeting</DialogTitle>
+            <DialogTitle>Create a MyBoost meeting</DialogTitle>
           </DialogHeader>
           <CreateMeetingForm
             onCancel={() => setOpenCreate(false)}
@@ -552,8 +552,8 @@ function CreateMeetingForm({
           {[15, 30, 45, 60, 90, 120, 180].map((minutes) => <option key={minutes} value={minutes}>{minutes} minutes</option>)}
         </Select>
       </Field>
-      <Field label="Invite LifeBoost users">
-        <Textarea value={form.participantEmails} onChange={(event) => setForm({ ...form, participantEmails: event.target.value })} placeholder="Enter registered LifeBoost email addresses, separated by commas" />
+      <Field label="Invite MyBoost users">
+        <Textarea value={form.participantEmails} onChange={(event) => setForm({ ...form, participantEmails: event.target.value })} placeholder="Enter registered MyBoost email addresses, separated by commas" />
       </Field>
       <Field label="Agenda">
         <Textarea value={form.agenda} onChange={(event) => setForm({ ...form, agenda: event.target.value })} placeholder="What do you want to discuss?" />

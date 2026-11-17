@@ -20,15 +20,11 @@ import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { ListingCover } from "@/components/listing-cover";
 import {
-  BusinessShowcase,
   filterListings,
   MarketKindChips,
   MarketplaceListings,
-  ProductShowcase,
   type MarketKind,
 } from "@/components/marketplace-listings";
-import { MarketplaceEngagement } from "@/components/marketplace-engagement";
-import { dedupeByNameOrImage } from "@/lib/marketplace-mix";
 import { PageHeader } from "@/components/page-header";
 import { PagedGrid } from "@/components/paged-grid";
 import { Badge } from "@/components/ui/badge";
@@ -39,7 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { initials, money } from "@/lib/format";
-import type { Asset, Business, Employee, MarketplaceListing } from "@/lib/types";
+import type { Asset, Business, Employee } from "@/lib/types";
 import { useLife } from "@/lib/store";
 
 export const Route = createFileRoute("/_app/marketplace")({
@@ -152,14 +148,10 @@ function MarketplacePage() {
   const listings = filterListings(publicMarketplace.listings, kind, q);
   const showAssets = kind === "all" || kind === "asset";
   const showPros = kind === "all" || kind === "professional";
-  const showBusinesses = false; // businesses live on the Businesses tab
+  const showBusinesses = kind === "all" || kind === "business";
 
-  const firms = dedupeByNameOrImage(
-    (publicMarketplace.businesses as Business[]).filter((b) =>
-      `${b.business_name} ${b.tagline} ${b.region}`.toLowerCase().includes(ql),
-    ),
-    (b) => b.business_name,
-    (b) => b.image_url,
+  const firms = (publicMarketplace.businesses as Business[]).filter((b) =>
+    `${b.business_name} ${b.tagline} ${b.region}`.toLowerCase().includes(ql),
   );
 
   const nothingToShow =
@@ -273,7 +265,7 @@ function MarketplacePage() {
                         contactBusiness(b.business_id);
                         openWhatsApp(
                           b.phone,
-                          `Hi, I found ${b.business_name} on LifeBoost Marketplace.`,
+                          `Hi, I found ${b.business_name} on MyBoost Marketplace.`,
                         );
                         toast.success(`Opening WhatsApp for ${b.business_name}.`);
                       }}
@@ -290,7 +282,7 @@ function MarketplacePage() {
       <PageHeader
         eyebrow="Public listings"
         title="Marketplace"
-        subtitle="Products, services, assets, professionals and businesses listed by LifeBoost users."
+        subtitle="Products, services, assets, professionals and businesses listed by MyBoost users."
       />
 
       <div className="mb-4 flex h-11 items-center gap-2 rounded-lg bg-paper px-3 shadow-border">
@@ -311,10 +303,6 @@ function MarketplacePage() {
 
         {/* MARKET: products, services, assets and professionals */}
         <TabsContent value="market">
-          {!ql && kind === "all" ? (
-            <ProductShowcase listings={publicMarketplace.listings as MarketplaceListing[]} />
-          ) : null}
-
           <MarketKindChips kind={kind} onChange={setKind} />
 
           {nothingToShow ? (
@@ -469,7 +457,7 @@ function MarketplacePage() {
                               contactAsset(asset.asset_id);
                               openWhatsApp(
                                 asset.phone,
-                                `Hi, I'm interested in your listing "${asset.name}" (${money(asset.value)}) on LifeBoost Marketplace.`,
+                                `Hi, I'm interested in your listing "${asset.name}" (${money(asset.value)}) on MyBoost Marketplace.`,
                               );
                               toast.success(`Opening WhatsApp for ${asset.name}.`);
                             }}
@@ -561,7 +549,7 @@ function MarketplacePage() {
                             contactProfessional(p.employee_id);
                             openWhatsApp(
                               p.phone,
-                              `Hi ${p.name}, I found you on LifeBoost Marketplace.`,
+                              `Hi ${p.name}, I found you on MyBoost Marketplace.`,
                             );
                             toast.success(`Opening WhatsApp for ${p.name}.`);
                           }}
@@ -594,12 +582,6 @@ function MarketplacePage() {
 
         {/* BUSINESSES */}
         <TabsContent value="businesses">
-          {!ql && firms.length > 0 ? (
-            <BusinessShowcase
-              businesses={firms}
-              onOpen={(id) => setBusinessDetailId(id)}
-            />
-          ) : null}
           {firms.length === 0 ? (
             <EmptyState
               icon={Building2}
@@ -661,7 +643,7 @@ function MarketplacePage() {
                   </p>
                   <p className="mt-1 text-sm text-ink-muted">
                     {selectedMarketplaceBusiness.tagline ||
-                      "Business listed on LifeBoost Marketplace."}
+                      "Business listed on MyBoost Marketplace."}
                   </p>
                   {selectedMarketplaceBusiness.region ? (
                     <p className="mt-2 inline-flex items-center gap-1 text-xs text-ink-muted">
@@ -719,7 +701,7 @@ function MarketplacePage() {
                     contactBusiness(selectedMarketplaceBusiness.business_id);
                     openWhatsApp(
                       selectedMarketplaceBusiness.phone,
-                      `Hi, I found ${selectedMarketplaceBusiness.business_name} on LifeBoost Marketplace.`,
+                      `Hi, I found ${selectedMarketplaceBusiness.business_name} on MyBoost Marketplace.`,
                     );
                     toast.success(
                       `Opening WhatsApp for ${selectedMarketplaceBusiness.business_name}.`,

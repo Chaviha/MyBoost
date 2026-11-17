@@ -19,6 +19,7 @@ import { AccessDenied } from "@/components/access-denied";
 import { downloadQuoteHtml, printQuotePdf } from "@/lib/quote-export";
 import { MoreActions } from "@/components/more-actions";
 import { CustomizerQuoteBuilder } from "@/components/customizer-quote-builder";
+import { CollapsibleCard } from "@/components/collapsible-card";
 import { Toolbar } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
 import { Field } from "@/components/field";
@@ -74,7 +75,7 @@ const QUOTE_TYPES: { value: QuoteType; label: string; blurb: string }[] = [
   {
     value: "custom_product",
     label: "Materials & Products",
-    blurb: "Search products across lifeBoostSME — steel, agriculture, construction & more",
+    blurb: "Search products across MyBoost — steel, agriculture, construction & more",
   },
   {
     value: "customizer_quote",
@@ -722,7 +723,7 @@ function QuotationsPage() {
                 addQuotation(form);
                 toast.success(
                   cust.user_id
-                    ? `Quotation sent to ${cust.name} — it will appear in their lifeBoostSME account.`
+                    ? `Quotation sent to ${cust.name} — it will appear in their MyBoost account.`
                     : `Quotation saved for ${cust.name} — share the review link, WhatsApp, or email.`,
                 );
               }
@@ -913,7 +914,7 @@ function QuoteWizard({
               <option key={c.customer_id} value={c.customer_id}>
                 {c.name}
                 {c.email ? ` · ${c.email}` : ""}
-                {c.user_id ? " · lifeBoostSME" : ""}
+                {c.user_id ? " · MyBoost" : ""}
               </option>
             ))}
         </Select>
@@ -921,8 +922,8 @@ function QuoteWizard({
           <p className="mt-1 text-xs text-ink-muted">
             Quote will be sent to this customer
             {customers.find((c) => c.customer_id === customerId)?.user_id
-              ? " (appears in their lifeBoostSME account)"
-              : " (share link / WhatsApp / email — no lifeBoostSME account linked yet)"}
+              ? " (appears in their MyBoost account)"
+              : " (share link / WhatsApp / email — no MyBoost account linked yet)"}
             .
           </p>
         ) : null}
@@ -1171,11 +1172,10 @@ function SteelMaterialPicker({
   }, [steelProducts, query, category]);
 
   return (
-    <Card className="mb-4 p-4">
-      <div className="mb-3">
-        <p className="text-sm font-medium">Select material</p>
-        <p className="text-xs text-ink-muted">Search the steel catalogue, select the exact material/section, then continue to the quotation.</p>
-      </div>
+    <CollapsibleCard
+      title="Select material"
+      description="Search the steel catalogue, select the exact material/section, then continue to the quotation."
+    >
       <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
         <Input
           value={query}
@@ -1188,7 +1188,7 @@ function SteelMaterialPicker({
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </Select>
       </div>
-      <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-ink/10 divide-y divide-ink/10">
+      <div className="max-h-72 overflow-y-auto rounded-lg border border-ink/10 divide-y divide-ink/10">
         {results.length ? results.map((p) => {
           const kgm = catalogMassKgPerM(p);
           return (
@@ -1215,7 +1215,7 @@ function SteelMaterialPicker({
           <p className="p-4 text-sm text-ink-muted">No steel material found. Try a size, designation, NB, OD, thickness, or product name.</p>
         )}
       </div>
-    </Card>
+    </CollapsibleCard>
   );
 }
 
@@ -1382,15 +1382,10 @@ function CatalogueQuoteBuilder({
   const selected = selectedId ? products.find((p) => p.product_id === selectedId) : undefined;
 
   return (
-    <Card className="mb-4 p-4">
-      <div className="mb-3">
-        <p className="text-sm font-medium">Search catalogue</p>
-        <p className="text-xs text-ink-muted">
-          Find a product, check its catalogue price and the hardware that stocks it, then set the
-          length / width and quantity. Add as many products as you need.
-        </p>
-      </div>
-
+    <CollapsibleCard
+      title="Search catalogue"
+      description="Find a product, check its catalogue price and the hardware that stocks it, then set the length / width and quantity. Add as many products as you need."
+    >
       {selected ? (
         <CatalogueLineEditor
           key={selected.product_id}
@@ -1458,7 +1453,7 @@ function CatalogueQuoteBuilder({
           </div>
         </>
       )}
-    </Card>
+    </CollapsibleCard>
   );
 }
 
@@ -2017,12 +2012,11 @@ function SteelBuilder({
   }
 
   return (
-    <Card className="mb-4 p-4">
-      <p className="mb-3 text-sm font-medium">Steel & materials calculator</p>
-      <p className="mb-3 text-xs text-ink-muted">
-        Enter the <span className="font-medium text-ink">finished size</span>. For standard sections such as RHS, SHS, angles, I-beams and channels, lifeBoostSME uses the catalogue <span className="font-medium text-ink">kg/m</span> reference when available, then applies the exact cut length and quantity.
-      </p>
-      <div className="mb-3 grid gap-3 sm:grid-cols-2">
+    <CollapsibleCard
+      title="Steel & materials calculator"
+      description="Enter the finished size. For standard sections such as RHS, SHS, angles, I-beams and channels, MyBoost uses the catalogue kg/m reference when available, then applies the exact cut length and quantity."
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Category">
           <Select
             value={category}
@@ -2355,7 +2349,7 @@ function SteelBuilder({
           </span>
         ) : null}
       </div>
-    </Card>
+    </CollapsibleCard>
   );
 }
 
@@ -2712,18 +2706,15 @@ function FabricationCostBuilder({
   }
 
   return (
-    <Card className="mb-4 p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium">Fabrication costs</p>
-          <p className="text-xs text-ink-muted">
-            Rates from your <strong>Services</strong> tab
-            {services.length
-              ? ` (${services.length} rate${services.length === 1 ? "" : "s"} loaded)`
-              : " — none found yet: add labour/cut/transport under Services"}
-            . Engineer enters hours, km, or metres only.
-          </p>
-        </div>
+    <CollapsibleCard
+      title="Fabrication costs"
+      description={`Rates from your Services tab${
+        services.length
+          ? ` (${services.length} rate${services.length === 1 ? "" : "s"} loaded)`
+          : " — none found yet: add labour/cut/transport under Services"
+      }. Engineer enters hours, km, or metres only.`}
+    >
+      <div className="flex items-center justify-between gap-2">
         <Select
           value={kind}
           onChange={(e) => {
@@ -2992,7 +2983,7 @@ function FabricationCostBuilder({
           </Button>
         </div>
       ) : null}
-    </Card>
+    </CollapsibleCard>
   );
 }
 
@@ -3149,18 +3140,11 @@ function DxfBuilder({
   }
 
   return (
-    <Card className="mb-3 p-4">
-      <p className="mb-2 text-sm font-medium">DXF / CNC / engraver / punch pricing</p>
-      <p className="mb-3 text-xs text-ink-muted">
-        Choose process and material (lists or Customize). Type any{" "}
-        <span className="font-medium text-ink">thickness</span> in mm. Use{" "}
-        <span className="font-medium text-ink">Customize pricing</span> for an excel-style rate list
-        (pierce + KSh/m). Catalogue products named like{" "}
-        <span className="font-medium text-ink">&quot;Laser Cut Mild Steel 3mm&quot;</span> still
-        match when no list row applies.
-      </p>
-
-      <div className="mb-3 grid gap-3 sm:grid-cols-3">
+    <CollapsibleCard
+      title="DXF / CNC / engraver / punch pricing"
+      description="Choose process and material (lists or Customize). Type any thickness in mm. Use Customize pricing for an excel-style rate list (pierce + KSh/m). Catalogue products still match when no list row applies."
+    >
+      <div className="grid gap-3 sm:grid-cols-3">
         <Field label="Process">
           {customProcess ? (
             <div className="flex gap-1">
@@ -3484,7 +3468,7 @@ function DxfBuilder({
       >
         Add to quote
       </Button>
-    </Card>
+    </CollapsibleCard>
   );
 }
 
@@ -3566,7 +3550,10 @@ function MaterialsBuilder({
   }
 
   return (
-    <Card className="mb-3 p-4">
+    <CollapsibleCard
+      title="Search products"
+      description="Steel, agriculture, construction — any sector, any business"
+    >
       <Field label="Search products" hint="steel, agriculture, construction — any sector, any business">
         <Input
           value={query}
@@ -3666,6 +3653,6 @@ function MaterialsBuilder({
           + Add custom item (not in any catalog yet)
         </Button>
       )}
-    </Card>
+    </CollapsibleCard>
   );
 }

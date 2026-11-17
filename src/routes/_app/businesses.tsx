@@ -55,7 +55,7 @@ function BusinessesPage() {
     <>
       <Toolbar
         title="My businesses"
-        subtitle="Manage every business from one LifeBoost account."
+        subtitle="Manage every business from one MyBoost account."
         actionLabel="Add business"
         onAction={() => setOpen(true)}
       />
