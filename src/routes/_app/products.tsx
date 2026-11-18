@@ -675,10 +675,19 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   sku?: string;
                   category?: string;
                   unlocked?: Array<{ key: string; label: string; type: string; unit?: string }>;
+                  batchIndex?: number;
+                  batchCount?: number;
                 };
                 const cat = businessCategories.find((c) => c.category_id === activeCategoryId);
-                const rows = (payload.meta as { rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }> }).rows;
+                const rows = (payload.meta as {
+                  rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }>;
+                  rateTable?: Array<Record<string, string | number | null>>;
+                }).rows;
                 const primary = rows?.[0];
+                const rateTable =
+                  (payload.meta as { rateTable?: Array<Record<string, string | number | null>> }).rateTable ||
+                  rows?.map((r) => r.cells || {}) ||
+                  [];
                 const rawCols = (payload.meta as { columns?: import("@/lib/types").ProductCustomizerColumn[] }).columns || [];
                 const columns = rawCols.map((c) => ({
                   key: c.key,
@@ -688,6 +697,14 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   editableByQuoter: c.editableByQuoter !== false,
                   unit: c.unit,
                   sizeLocked: !!c.sizeLocked,
+                  options: c.options,
+                  lookupProductId: c.lookupProductId,
+                  lookupMatchKey: c.lookupMatchKey,
+                  lookupFillKeys: c.lookupFillKeys,
+                  lookupOption: c.lookupOption,
+                  costingSourceKey: c.costingSourceKey,
+                  subProducts: c.subProducts,
+                  subColumns: c.subColumns,
                 }));
                 const productId = addProduct({
                   name: payload.description,
@@ -701,6 +718,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   description: "Built with spreadsheet product builder",
                   specs: payload.specs,
                   itemKind: "product",
+                  customizerShared: payload.customizer_shared,
                   customizer: {
                     calculator: "advanced-spreadsheet",
                     columns,
@@ -708,10 +726,19 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                     formulas: primary?.formulas,
                     unlocked: meta.unlocked || [],
                     total: payload.cost_price,
+                    rateTable,
+                    catalogueProductId: (payload.meta as { catalogueProductId?: string })
+                      .catalogueProductId,
+                    catalogueRateKey:
+                      (payload.meta as { catalogueRateKey?: string }).catalogueRateKey || "RATE",
+                    catalogueLinks: (payload.meta as { catalogueLinks?: Record<string, string> }).catalogueLinks,
+                    catalogueVariants: (payload.meta as { catalogueVariants?: Record<string, string> }).catalogueVariants,
                   },
                 });
-                if (productId) {
-                  toast.success(`“${payload.description}” saved to catalogue.`);
+                // Multi-row save: one product per row; close dialog after the last in the batch
+                const batchCount = meta.batchCount ?? 1;
+                const batchIndex = meta.batchIndex ?? 0;
+                if (productId && batchIndex >= batchCount - 1) {
                   setBuilderOpen(false);
                 }
               }}
@@ -857,9 +884,14 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   category?: string;
                   columns?: import("@/lib/types").ProductCustomizerColumn[];
                   rows?: Array<{ cells?: Record<string, string | number | null>; formulas?: Record<string, string> }>;
+                  rateTable?: Array<Record<string, string | number | null>>;
                   unlocked?: Array<{ key: string; label: string; type: string; unit?: string }>;
+                  catalogueProductId?: string;
+                  catalogueRateKey?: string;
                 };
                 const primary = meta.rows?.[0];
+                const rateTable =
+                  meta.rateTable || meta.rows?.map((r) => r.cells || {}) || [];
                 updateProduct(builderEditProduct.product_id, {
                   name: payload.description,
                   unit: payload.unit || builderEditProduct.unit,
@@ -867,6 +899,7 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                   sku: meta.sku ?? builderEditProduct.sku,
                   cost_price: Number(payload.cost_price) || 0,
                   selling_price: Number(payload.selling_price) || 0,
+                  customizer_shared: Boolean(payload.customizer_shared),
                   specs: { ...(builderEditProduct.specs || {}), ...payload.specs },
                   customizer: {
                     calculator: "advanced-spreadsheet",
@@ -878,12 +911,27 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
                       editableByQuoter: c.editableByQuoter !== false,
                       unit: c.unit,
                       sizeLocked: !!c.sizeLocked,
+                      options: c.options,
+                      lookupProductId: c.lookupProductId,
+                      lookupMatchKey: c.lookupMatchKey,
+                      lookupFillKeys: c.lookupFillKeys,
+                      lookupOption: (c as { lookupOption?: string }).lookupOption,
+                      costingSourceKey: c.costingSourceKey,
+                      subProducts: c.subProducts,
+                      subColumns: c.subColumns,
                     })),
                     cells: (primary?.cells || {}) as Record<string, string | number | null>,
                     formulas: primary?.formulas,
                     unlocked: meta.unlocked || [],
                     total: payload.cost_price,
+                    rateTable,
+                    catalogueProductId: (meta as { catalogueProductId?: string }).catalogueProductId,
+                    catalogueRateKey:
+                      (meta as { catalogueRateKey?: string }).catalogueRateKey || "RATE",
+                    catalogueLinks: (meta as { catalogueLinks?: Record<string, string> }).catalogueLinks,
+                    catalogueVariants: (meta as { catalogueVariants?: Record<string, string> }).catalogueVariants,
                   },
+                  reference_product_id: (meta as { catalogueProductId?: string }).catalogueProductId,
                 });
                 setBuilderEditId(null);
               }}
@@ -895,11 +943,15 @@ export function CatalogueItemsPage({ itemKind }: { itemKind: "product" | "servic
       {customizerEditId && businessProducts.some((x) => x.product_id === customizerEditId) ? (
         <ProductCustomizerEditDialog
           product={businessProducts.find((x) => x.product_id === customizerEditId)!}
+          products={businessProducts.filter(
+            (x) => x.customizer?.columns?.length || x.customizer?.unlocked?.length,
+          )}
           open
           creatorMode
           onOpenChange={(v) => {
             if (!v) setCustomizerEditId(null);
           }}
+          onSelectProduct={(id) => setCustomizerEditId(id)}
           onSave={(patch) => {
             updateProduct(customizerEditId, patch);
           }}
@@ -1226,7 +1278,7 @@ function ImportProductsForm({
           variant="secondary"
           onClick={() =>
             downloadTextFile(
-              `myboost-${defaultKind}s-template.csv`,
+              `lifeboost-${defaultKind}s-template.csv`,
               productImportTemplateCsv(defaultKind),
             )
           }
