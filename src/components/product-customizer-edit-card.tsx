@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { money } from "@/lib/format";
 import { applyCheckboxCosting, hiddenCostingFields, isCostingChecked } from "@/lib/checkbox-costing";
-import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
+import { evaluateFormula as evaluateArithmetic, substituteCellValues } from "@/lib/formula-eval";
 import type { Product, ProductCustomizerConfig, SpecValues } from "@/lib/types";
 import { lookupRatesFromProductDetailed } from "@/components/advanced-quotation-calculator";
 import {
@@ -40,13 +40,11 @@ function evaluateFormulas(
   try {
     for (const col of columns) {
       if (col.type !== "formula") continue;
-      let expr = (formulas[col.key] ?? col.formula ?? "0").trim().replace(/^=/, "");
-      const keys = columns.map((c) => c.key).sort((a, b) => b.length - a.length);
-      for (const key of keys) {
-        const val = next[key];
-        const num = typeof val === "number" ? val : Number(val ?? 0);
-        expr = expr.replace(new RegExp(`\\b${key}\\b`, "gi"), String(Number.isFinite(num) ? num : 0));
-      }
+      const expr = substituteCellValues(
+        (formulas[col.key] ?? col.formula ?? "0").trim().replace(/^=/, ""),
+        next,
+        columns.map((c) => c.key),
+      );
       next[col.key] = evaluateArithmetic(expr);
     }
     const amountCol =

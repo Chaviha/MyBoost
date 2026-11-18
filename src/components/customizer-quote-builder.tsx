@@ -7,8 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Field } from "@/components/field";
 import { money, uid } from "@/lib/format";
-import { applyCheckboxCosting, hiddenCostingFields, isCostingChecked } from "@/lib/checkbox-costing";
-import { evaluateFormula as evaluateArithmetic } from "@/lib/formula-eval";
+import {
+  applyCheckboxCosting,
+  costingBreakdown,
+  hiddenCostingFields,
+  isCostingChecked,
+} from "@/lib/checkbox-costing";
+import { evaluateFormula as evaluateArithmetic, substituteCellValues } from "@/lib/formula-eval";
 import type { Product, ProductCustomizerConfig, QuoteLineItem } from "@/lib/types";
 import type { SubColumnDef, SubProduct } from "@/lib/sub-products";
 import { lookupRatesFromProductDetailed } from "@/components/advanced-quotation-calculator";
@@ -35,16 +40,11 @@ function evaluateFormulas(
   try {
     for (const col of columns) {
       if (col.type !== "formula") continue;
-      let expr = (formulas[col.key] ?? col.formula ?? "0").trim().replace(/^=/, "");
-      const keys = columns.map((c) => c.key).sort((a, b) => b.length - a.length);
-      for (const key of keys) {
-        const val = next[key];
-        const num = typeof val === "number" ? val : Number(val ?? 0);
-        expr = expr.replace(
-          new RegExp(`\\b${key}\\b`, "gi"),
-          String(Number.isFinite(num) ? num : 0),
-        );
-      }
+      const expr = substituteCellValues(
+        (formulas[col.key] ?? col.formula ?? "0").trim().replace(/^=/, ""),
+        next,
+        columns.map((c) => c.key),
+      );
       next[col.key] = evaluateArithmetic(expr);
     }
     const amountCol =
@@ -377,10 +377,15 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
       parts.push(`${u.label}: ${v}${u.unit ? ` ${u.unit}` : ""}`);
     }
     const detail = parts.length ? ` (${parts.join(", ")})` : "";
+    // Ticked costing items for THIS line, e.g. "Welding KSh 29,000 + Painting KSh 2,930"
+    const breakdown = costingBreakdown(computed.cells, config.columns);
+    const included = breakdown.length
+      ? ` — Includes: ${breakdown.map((b) => `${b.label} ${money(b.amount)}`).join(" + ")}`
+      : "";
 
     onAdd({
       line_id: uid("LI"),
-      description: `${selected.name}${detail}`,
+      description: `${selected.name}${detail}${included}`,
       qty: q,
       unit: selected.unit || "item",
       rate: unitRate,
@@ -393,6 +398,7 @@ export function CustomizerQuoteBuilder({ products: ownProducts, onAdd }: Props) 
         product_id: selected.product_id,
         cells: computed.cells as Record<string, string | number | null>,
         unit_cost: unitRate,
+        costing: Object.fromEntries(breakdown.map((b) => [b.label, b.amount])),
       },
     });
     setLinesAdded((n) => n + 1);

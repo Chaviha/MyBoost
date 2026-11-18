@@ -1,5 +1,5 @@
 import { uid } from "@/lib/format";
-import { evaluateFormula } from "@/lib/formula-eval";
+import { evaluateFormula, substituteCellValues } from "@/lib/formula-eval";
 
 /**
  * A product nested inside a product. Sub-products form a tree: picking one in a
@@ -93,9 +93,11 @@ export function rowValues(
   }
   for (const c of subColumns) {
     if (c.type !== "formula" || !c.formula) continue;
-    let expr = c.formula.trim().replace(/^=/, "");
-    const keys = subColumns.map((x) => x.key).sort((a, b) => b.length - a.length);
-    for (const k of keys) expr = expr.replace(new RegExp(`\\b${k}\\b`, "gi"), String(toNum(out[k])));
+    const expr = substituteCellValues(
+      c.formula.trim().replace(/^=/, ""),
+      out,
+      subColumns.map((x) => x.key),
+    );
     try {
       out[c.key] = evaluateFormula(expr);
     } catch {

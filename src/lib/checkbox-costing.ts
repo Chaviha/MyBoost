@@ -1,4 +1,4 @@
-import { evaluateFormula } from "@/lib/formula-eval";
+import { evaluateFormula, substituteCellValues } from "@/lib/formula-eval";
 import type { ProductCustomizerColumn } from "@/lib/types";
 
 type Cells = Record<string, string | number | null>;
@@ -101,15 +101,14 @@ export function computeCustomizerTotal(
   const columns = config.columns || [];
   const next: Cells = { ...cells };
   try {
-    const keys = columns.map((c) => c.key).sort((a, b) => b.length - a.length);
+    const keys = columns.map((c) => c.key);
     for (const col of columns) {
       if (col.type !== "formula") continue;
-      let expr = String(config.formulas?.[col.key] ?? col.formula ?? "0").trim().replace(/^=/, "") || "0";
-      for (const key of keys) {
-        const raw = next[key];
-        const num = typeof raw === "number" ? raw : Number(raw ?? 0);
-        expr = expr.replace(new RegExp(`\\b${escapeRe(key)}\\b`, "gi"), String(Number.isFinite(num) ? num : 0));
-      }
+      const expr = substituteCellValues(
+        String(config.formulas?.[col.key] ?? col.formula ?? "0").trim().replace(/^=/, "") || "0",
+        next,
+        keys,
+      );
       next[col.key] = evaluateFormula(expr);
     }
     const amountCol =
@@ -121,4 +120,18 @@ export function computeCustomizerTotal(
   } catch {
     return fallback;
   }
+}
+
+/** Ticked costing items with their amounts, in column order (for quote lines). */
+export function costingBreakdown(
+  cells: Cells,
+  columns: Col[] | undefined | null,
+): { label: string; amount: number }[] {
+  return linkedCostingToggles(columns)
+    .filter((t) => isCostingChecked(cells[t.key]))
+    .map((t) => ({
+      label: (t.label || t.key).trim(),
+      amount: Number(cells[t.costingSourceKey!] ?? 0) || 0,
+    }))
+    .filter((b) => b.amount !== 0);
 }
